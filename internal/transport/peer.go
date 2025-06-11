@@ -39,8 +39,8 @@ func (p *PeerService) CreatePeerConnection(ctx context.Context) (*webrtc.PeerCon
 }
 
 // SetupConnectionStateHandler configures connection state change handling
-func (p *PeerService) SetupConnectionStateHandler(pc *webrtc.PeerConnection, role string) {
-	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+func (p *PeerService) SetupConnectionStateHandler(peerConn *webrtc.PeerConnection, role string) {
+	peerConn.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		if p.stateHandler != nil {
 			p.stateHandler.OnStateChange(state, role)
 		} else {
@@ -51,11 +51,11 @@ func (p *PeerService) SetupConnectionStateHandler(pc *webrtc.PeerConnection, rol
 }
 
 // Close gracefully closes the peer connection
-func (p *PeerService) Close(pc *webrtc.PeerConnection) error {
-	if pc == nil {
+func (p *PeerService) Close(peerConn *webrtc.PeerConnection) error {
+	if peerConn == nil {
 		return nil
 	}
-	return pc.Close()
+	return peerConn.Close()
 }
 
 // defaultStateHandler provides default connection state handling

@@ -29,9 +29,8 @@ yapfs/
 │   │   ├── peer.go         # Peer connection service
 │   │   ├── data_channel.go # Data channel facade
 │   │   ├── signaling.go    # SDP exchange service
-│   │   └── datachannel/    # Data channel implementations
-│   │       ├── sender.go   # File sending logic
-│   │       └── receiver.go # File receiving logic
+│   │   ├── sender.go       # File sending logic
+│   │   └── receiver.go     # File receiving logic
 │   └── ui/                 # User interface layer
 │       ├── interactive.go  # Console-based UI implementation
 │       └── progress.go     # Progress reporting and display
@@ -48,20 +47,20 @@ Manages WebRTC peer connection lifecycle:
 - Provides default state handling for failed/closed connections
 
 #### **DataChannelService** (`internal/transport/data_channel.go`)
-Facade service that composes sender and receiver services:
-- Delegates sender operations to `datachannel.SenderService`
-- Delegates receiver operations to `datachannel.ReceiverService`
+Facade service that composes sender and receiver channels:
+- Delegates sender operations to `SenderChannel`
+- Delegates receiver operations to `ReceiverChannel`
 - Maintains backward compatibility with existing API
 - Provides unified interface for data channel operations
 
-#### **SenderService** (`internal/transport/datachannel/sender.go`)
+#### **SenderChannel** (`internal/transport/sender.go`)
 Handles file sending logic:
 - Creates sender data channels with flow control
 - Implements chunked file reading and transmission
 - Manages flow control and buffering
 - Handles EOF signaling for transfer completion
 
-#### **ReceiverService** (`internal/transport/datachannel/receiver.go`)
+#### **ReceiverChannel** (`internal/transport/receiver.go`)
 Handles file receiving logic:
 - Sets up receiver data channel handlers
 - Manages file writing and progress tracking

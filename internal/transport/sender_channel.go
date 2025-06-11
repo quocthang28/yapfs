@@ -11,27 +11,27 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-// SenderService manages data channel operations for sending files
-type SenderService struct {
+// SenderChannel manages data channel operations for sending files
+type SenderChannel struct {
 	config *config.Config
 }
 
-// NewSenderService creates a new data channel sender service
-func NewSenderService(cfg *config.Config) *SenderService {
-	return &SenderService{
+// NewSenderChannel creates a new data channel sender
+func NewSenderChannel(cfg *config.Config) *SenderChannel {
+	return &SenderChannel{
 		config: cfg,
 	}
 }
 
 // CreateFileSenderDataChannel creates a data channel configured for sending files
-func (s *SenderService) CreateFileSenderDataChannel(pc *webrtc.PeerConnection, label string) (*webrtc.DataChannel, error) {
-	ordered := true
+func (s *SenderChannel) CreateFileSenderDataChannel(peerConn *webrtc.PeerConnection, label string) (*webrtc.DataChannel, error) {
+	ordered := true //TODO: once data processor handle chunking this should be false
 
 	options := &webrtc.DataChannelInit{
 		Ordered: &ordered,
 	}
 
-	dataChannel, err := pc.CreateDataChannel(label, options)
+	dataChannel, err := peerConn.CreateDataChannel(label, options)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create file data channel: %w", err)
 	}
@@ -40,7 +40,7 @@ func (s *SenderService) CreateFileSenderDataChannel(pc *webrtc.PeerConnection, l
 }
 
 // SetupFileSender configures file sending for a data channel
-func (s *SenderService) SetupFileSender(dataChannel *webrtc.DataChannel, dataProcessor *processor.DataProcessor, filePath string) error {
+func (s *SenderChannel) SetupFileSender(dataChannel *webrtc.DataChannel, dataProcessor *processor.DataProcessor, filePath string) error {
 	sendMoreCh := make(chan struct{}, 1)
 
 	// OnOpen sets an event handler which is invoked when the underlying data transport has been established (or re-established).

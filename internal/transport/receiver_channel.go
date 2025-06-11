@@ -10,24 +10,24 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-// ReceiverService manages data channel operations for receiving files
-type ReceiverService struct {
+// ReceiverChannel manages data channel operations for receiving files
+type ReceiverChannel struct {
 	config *config.Config
 }
 
-// NewReceiverService creates a new data channel receiver service
-func NewReceiverService(cfg *config.Config) *ReceiverService {
-	return &ReceiverService{
+// NewReceiverChannel creates a new data channel receiver
+func NewReceiverChannel(cfg *config.Config) *ReceiverChannel {
+	return &ReceiverChannel{
 		config: cfg,
 	}
 }
 
 // SetupFileReceiver sets up handlers for receiving files and returns a completion channel
-func (r *ReceiverService) SetupFileReceiver(pc *webrtc.PeerConnection, dataProcessor *processor.DataProcessor, dstPath string) (<-chan struct{}, error) {
+func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, dataProcessor *processor.DataProcessor, dstPath string) (<-chan struct{}, error) {
 	doneCh := make(chan struct{})
 
 	// OnDataChannel sets an event handler which is invoked when a data channel message arrives from a remote peer.
-	pc.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
+	peerConn.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
 		log.Printf("Received data channel: %s-%d", dataChannel.Label(), dataChannel.ID())
 
 		var fileWriter *os.File

@@ -61,21 +61,21 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	s.ui.ShowMessage(fmt.Sprintf("Preparing to send file: %s", opts.FilePath))
 
 	// Create peer connection
-	pc, err := s.peerService.CreatePeerConnection(ctx)
+	peerConn, err := s.peerService.CreatePeerConnection(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to create peer connection: %w", err)
 	}
 	defer func() {
-		if err := s.peerService.Close(pc); err != nil {
+		if err := s.peerService.Close(peerConn); err != nil {
 			s.ui.ShowMessage(fmt.Sprintf("Error closing peer connection: %v", err))
 		}
 	}()
 
 	// Setup connection state handler
-	s.peerService.SetupConnectionStateHandler(pc, "sender")
+	s.peerService.SetupConnectionStateHandler(peerConn, "sender")
 
 	// Create data channel for file transfer
-	dataChannel, err := s.dataChannelService.CreateFileSenderDataChannel(pc, "fileTransfer")
+	dataChannel, err := s.dataChannelService.CreateFileSenderDataChannel(peerConn, "fileTransfer")
 	if err != nil {
 		return fmt.Errorf("failed to create file sender data channel: %w", err)
 	}
@@ -86,20 +86,20 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	}
 
 	// Create offer
-	_, err = s.signalingService.CreateOffer(ctx, pc)
+	_, err = s.signalingService.CreateOffer(ctx, peerConn)
 	if err != nil {
 		return fmt.Errorf("failed to create offer: %w", err)
 	}
 
 	// Wait for ICE gathering to complete
 	s.ui.ShowMessage("Gathering ICE candidates...")
-	err = s.signalingService.WaitForICEGathering(ctx, pc)
+	err = s.signalingService.WaitForICEGathering(ctx, peerConn)
 	if err != nil {
 		return fmt.Errorf("failed to gather ICE candidates: %w", err)
 	}
 
 	// Get the final offer with ICE candidates
-	finalOffer := pc.LocalDescription()
+	finalOffer := peerConn.LocalDescription()
 	if finalOffer == nil {
 		return fmt.Errorf("local description is nil after ICE gathering")
 	}
@@ -127,7 +127,7 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 		return fmt.Errorf("failed to decode answer SDP: %w", err)
 	}
 
-	err = s.signalingService.SetRemoteDescription(pc, answerSD)
+	err = s.signalingService.SetRemoteDescription(peerConn, answerSD)
 	if err != nil {
 		return fmt.Errorf("failed to set remote description: %w", err)
 	}

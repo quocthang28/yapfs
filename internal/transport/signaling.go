@@ -18,13 +18,13 @@ func NewSignalingService() *SignalingService {
 }
 
 // CreateOffer creates and sets an SDP offer for the peer connection
-func (s *SignalingService) CreateOffer(ctx context.Context, pc *webrtc.PeerConnection) (*webrtc.SessionDescription, error) {
-	offer, err := pc.CreateOffer(nil)
+func (s *SignalingService) CreateOffer(ctx context.Context, peerConn *webrtc.PeerConnection) (*webrtc.SessionDescription, error) {
+	offer, err := peerConn.CreateOffer(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create offer: %w", err)
 	}
 
-	err = pc.SetLocalDescription(offer)
+	err = peerConn.SetLocalDescription(offer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set local description: %w", err)
 	}
@@ -33,13 +33,13 @@ func (s *SignalingService) CreateOffer(ctx context.Context, pc *webrtc.PeerConne
 }
 
 // CreateAnswer creates and sets an SDP answer for the peer connection
-func (s *SignalingService) CreateAnswer(ctx context.Context, pc *webrtc.PeerConnection) (*webrtc.SessionDescription, error) {
-	answer, err := pc.CreateAnswer(nil)
+func (s *SignalingService) CreateAnswer(ctx context.Context, peerConn *webrtc.PeerConnection) (*webrtc.SessionDescription, error) {
+	answer, err := peerConn.CreateAnswer(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create answer: %w", err)
 	}
 
-	err = pc.SetLocalDescription(answer)
+	err = peerConn.SetLocalDescription(answer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set local description: %w", err)
 	}
@@ -48,8 +48,8 @@ func (s *SignalingService) CreateAnswer(ctx context.Context, pc *webrtc.PeerConn
 }
 
 // SetRemoteDescription sets the remote session description
-func (s *SignalingService) SetRemoteDescription(pc *webrtc.PeerConnection, sd webrtc.SessionDescription) error {
-	err := pc.SetRemoteDescription(sd)
+func (s *SignalingService) SetRemoteDescription(peerConn *webrtc.PeerConnection, sd webrtc.SessionDescription) error {
+	err := peerConn.SetRemoteDescription(sd)
 	if err != nil {
 		return fmt.Errorf("failed to set remote description: %w", err)
 	}
@@ -57,11 +57,11 @@ func (s *SignalingService) SetRemoteDescription(pc *webrtc.PeerConnection, sd we
 }
 
 // WaitForICEGathering waits for ICE candidate gathering to complete
-func (s *SignalingService) WaitForICEGathering(ctx context.Context, pc *webrtc.PeerConnection) error {
+func (s *SignalingService) WaitForICEGathering(ctx context.Context, peerConn *webrtc.PeerConnection) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-webrtc.GatheringCompletePromise(pc):
+	case <-webrtc.GatheringCompletePromise(peerConn):
 		return nil
 	}
 }

@@ -57,21 +57,21 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	r.ui.ShowMessage(fmt.Sprintf("Preparing to receive file to: %s", opts.DstPath))
 
 	// Create peer connection
-	pc, err := r.peerService.CreatePeerConnection(ctx)
+	peerConn, err := r.peerService.CreatePeerConnection(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to create peer connection: %w", err)
 	}
 	defer func() {
-		if err := r.peerService.Close(pc); err != nil {
+		if err := r.peerService.Close(peerConn); err != nil {
 			r.ui.ShowMessage(fmt.Sprintf("Error closing peer connection: %v", err))
 		}
 	}()
 
 	// Setup connection state handler
-	r.peerService.SetupConnectionStateHandler(pc, "receiver")
+	r.peerService.SetupConnectionStateHandler(peerConn, "receiver")
 
 	// Setup file receiver
-	completionCh, err := r.dataChannelService.SetupFileReceiver(pc, r.dataProcessor, opts.DstPath)
+	doneCh, err := r.dataChannelService.SetupFileReceiver(peerConn, r.dataProcessor, opts.DstPath)
 	if err != nil {
 		return fmt.Errorf("failed to setup file receiver data channel handler: %w", err)
 	}
@@ -88,26 +88,26 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 		return fmt.Errorf("failed to decode offer SDP: %w", err)
 	}
 
-	err = r.signalingService.SetRemoteDescription(pc, offerSD)
+	err = r.signalingService.SetRemoteDescription(peerConn, offerSD)
 	if err != nil {
 		return fmt.Errorf("failed to set remote description: %w", err)
 	}
 
 	// Create answer
-	_, err = r.signalingService.CreateAnswer(ctx, pc)
+	_, err = r.signalingService.CreateAnswer(ctx, peerConn)
 	if err != nil {
 		return fmt.Errorf("failed to create answer: %w", err)
 	}
 
 	// Wait for ICE gathering to complete
 	r.ui.ShowMessage("Gathering ICE candidates...")
-	err = r.signalingService.WaitForICEGathering(ctx, pc)
+	err = r.signalingService.WaitForICEGathering(ctx, peerConn)
 	if err != nil {
 		return fmt.Errorf("failed to gather ICE candidates: %w", err)
 	}
 
 	// Get the final answer with ICE candidates
-	finalAnswer := pc.LocalDescription()
+	finalAnswer := peerConn.LocalDescription()
 	if finalAnswer == nil {
 		return fmt.Errorf("local description is nil after ICE gathering")
 	}
@@ -127,7 +127,7 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 
 	// Wait for either transfer completion or context cancellation
 	select {
-	case <-completionCh:
+	case <-doneCh:
 		r.ui.ShowMessage("File transfer completed successfully")
 		return nil
 	case <-ctx.Done():
