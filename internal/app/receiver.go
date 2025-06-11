@@ -13,26 +13,26 @@ import (
 	"yapfs/internal/webrtc"
 )
 
-// receiverApp implements ReceiverApp interface
-type receiverApp struct {
+// ReceiverApp implements receiver application logic
+type ReceiverApp struct {
 	config           *config.Config
-	peerService      webrtc.PeerService
-	dataChannelService webrtc.DataChannelService
-	signalingService webrtc.SignalingService
-	ui               ui.InteractiveUI
-	fileService      file.FileService
+	peerService      *webrtc.PeerService
+	dataChannelService *webrtc.DataChannelService
+	signalingService *webrtc.SignalingService
+	ui               *ui.ConsoleUI
+	fileService      *file.FileService
 }
 
 // NewReceiverApp creates a new receiver application
 func NewReceiverApp(
 	cfg *config.Config,
-	peerService webrtc.PeerService,
-	dataChannelService webrtc.DataChannelService,
-	signalingService webrtc.SignalingService,
-	ui ui.InteractiveUI,
-	fileService file.FileService,
-) ReceiverApp {
-	return &receiverApp{
+	peerService *webrtc.PeerService,
+	dataChannelService *webrtc.DataChannelService,
+	signalingService *webrtc.SignalingService,
+	ui *ui.ConsoleUI,
+	fileService *file.FileService,
+) *ReceiverApp {
+	return &ReceiverApp{
 		config:           cfg,
 		peerService:      peerService,
 		dataChannelService: dataChannelService,
@@ -43,7 +43,7 @@ func NewReceiverApp(
 }
 
 // Run starts the receiver application
-func (r *receiverApp) Run(ctx context.Context) error {
+func (r *ReceiverApp) Run(ctx context.Context) error {
 	r.ui.ShowInstructions("receiver")
 
 	// Create peer connection
@@ -111,7 +111,7 @@ func (r *receiverApp) Run(ctx context.Context) error {
 }
 
 // RunWithDest starts the receiver application to save file to destination
-func (r *receiverApp) RunWithDest(ctx context.Context, dstPath string) error {
+func (r *ReceiverApp) RunWithDest(ctx context.Context, dstPath string) error {
 	r.ui.ShowMessage(fmt.Sprintf("Preparing to receive file to: %s", dstPath))
 
 	// Create peer connection

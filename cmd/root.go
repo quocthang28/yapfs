@@ -73,7 +73,7 @@ func createContext() context.Context {
 }
 
 // createServices creates and wires up all the application services
-func createServices() (webrtc.PeerService, webrtc.DataChannelService, webrtc.SignalingService, ui.InteractiveUI, file.FileService) {
+func createServices() (*webrtc.PeerService, *webrtc.DataChannelService, *webrtc.SignalingService, *ui.ConsoleUI, *file.FileService) {
 	// Create connection state handler
 	stateHandler := &webrtc.DefaultConnectionStateHandler{}
 

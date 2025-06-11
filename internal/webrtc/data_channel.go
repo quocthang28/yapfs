@@ -16,22 +16,22 @@ import (
 	"yapfs/internal/file"
 )
 
-// dataChannelService implements DataChannelService interface
-type dataChannelService struct {
+// DataChannelService manages data channel operations and flow control
+type DataChannelService struct {
 	config *config.Config
-	throughputReporter ThroughputReporter
+	throughputReporter *DefaultThroughputReporter
 }
 
 // NewDataChannelService creates a new data channel service
-func NewDataChannelService(cfg *config.Config, reporter ThroughputReporter) DataChannelService {
-	return &dataChannelService{
+func NewDataChannelService(cfg *config.Config, reporter *DefaultThroughputReporter) *DataChannelService {
+	return &DataChannelService{
 		config: cfg,
 		throughputReporter: reporter,
 	}
 }
 
 // CreateSenderDataChannel creates a data channel configured for sending with flow control
-func (d *dataChannelService) CreateSenderDataChannel(pc *webrtc.PeerConnection, label string) (*webrtc.DataChannel, error) {
+func (d *DataChannelService) CreateSenderDataChannel(pc *webrtc.PeerConnection, label string) (*webrtc.DataChannel, error) {
 	ordered := false
 	maxRetransmits := uint16(0)
 
@@ -50,7 +50,7 @@ func (d *dataChannelService) CreateSenderDataChannel(pc *webrtc.PeerConnection, 
 }
 
 // SetupReceiverDataChannelHandler sets up handlers for incoming data channels
-func (d *dataChannelService) SetupReceiverDataChannelHandler(pc *webrtc.PeerConnection) error {
+func (d *DataChannelService) SetupReceiverDataChannelHandler(pc *webrtc.PeerConnection) error {
 	pc.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
 		var totalBytesReceived uint64
 
@@ -85,14 +85,14 @@ func (d *dataChannelService) SetupReceiverDataChannelHandler(pc *webrtc.PeerConn
 }
 
 // StartSending begins the data sending process on the given channel
-func (d *dataChannelService) StartSending(ctx context.Context, dc *webrtc.DataChannel) error {
+func (d *DataChannelService) StartSending(ctx context.Context, dc *webrtc.DataChannel) error {
 	// This method can be used to start sending from outside the OnOpen callback
 	// For now, the sending is automatically started in setupSenderFlowControl
 	return nil
 }
 
 // setupSenderFlowControl configures flow control for a sending data channel
-func (d *dataChannelService) setupSenderFlowControl(dataChannel *webrtc.DataChannel) {
+func (d *DataChannelService) setupSenderFlowControl(dataChannel *webrtc.DataChannel) {
 	buf := make([]byte, d.config.WebRTC.PacketSize)
 	sendMoreCh := make(chan struct{}, 1)
 
@@ -140,7 +140,7 @@ func (d *DefaultThroughputReporter) OnThroughputUpdate(mbps float64) {
 }
 
 // CreateFileSenderDataChannel creates a data channel configured for sending files
-func (d *dataChannelService) CreateFileSenderDataChannel(pc *webrtc.PeerConnection, label string, fileService file.FileService, filePath string) (*webrtc.DataChannel, error) {
+func (d *DataChannelService) CreateFileSenderDataChannel(pc *webrtc.PeerConnection, label string, fileService *file.FileService, filePath string) (*webrtc.DataChannel, error) {
 	ordered := true
 	
 	options := &webrtc.DataChannelInit{
@@ -161,11 +161,11 @@ func (d *dataChannelService) CreateFileSenderDataChannel(pc *webrtc.PeerConnecti
 }
 
 // SetupFileReceiverDataChannelHandler sets up handlers for receiving files
-func (d *dataChannelService) SetupFileReceiverDataChannelHandler(pc *webrtc.PeerConnection, fileService file.FileService, dstPath string) error {
+func (d *DataChannelService) SetupFileReceiverDataChannelHandler(pc *webrtc.PeerConnection, fileService *file.FileService, dstPath string) error {
 	pc.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
 		log.Printf("Received data channel: %s-%d", dataChannel.Label(), dataChannel.ID())
 		
-		var fileWriter file.FileWriter
+		var fileWriter *file.FileWriter
 		var totalBytesReceived uint64
 
 		dataChannel.OnOpen(func() {
@@ -238,7 +238,7 @@ func (d *dataChannelService) SetupFileReceiverDataChannelHandler(pc *webrtc.Peer
 }
 
 // setupFileSender configures file sending for a data channel
-func (d *dataChannelService) setupFileSender(dataChannel *webrtc.DataChannel, fileService file.FileService, filePath string) error {
+func (d *DataChannelService) setupFileSender(dataChannel *webrtc.DataChannel, fileService *file.FileService, filePath string) error {
 	sendMoreCh := make(chan struct{}, 1)
 
 	dataChannel.OnOpen(func() {
@@ -329,13 +329,13 @@ func (d *dataChannelService) setupFileSender(dataChannel *webrtc.DataChannel, fi
 }
 
 // SetupFileReceiverWithCompletion sets up handlers for receiving files and returns a completion channel
-func (d *dataChannelService) SetupFileReceiverWithCompletion(pc *webrtc.PeerConnection, fileService file.FileService, dstPath string) (<-chan struct{}, error) {
+func (d *DataChannelService) SetupFileReceiverWithCompletion(pc *webrtc.PeerConnection, fileService *file.FileService, dstPath string) (<-chan struct{}, error) {
 	completionCh := make(chan struct{})
 	
 	pc.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
 		log.Printf("Received data channel: %s-%d", dataChannel.Label(), dataChannel.ID())
 		
-		var fileWriter file.FileWriter
+		var fileWriter *file.FileWriter
 		var totalBytesReceived uint64
 
 		dataChannel.OnOpen(func() {

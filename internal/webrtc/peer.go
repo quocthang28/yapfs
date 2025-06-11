@@ -9,22 +9,22 @@ import (
 	"yapfs/internal/config"
 )
 
-// peerService implements PeerService interface
-type peerService struct {
+// PeerService manages WebRTC peer connection lifecycle
+type PeerService struct {
 	config *config.Config
-	stateHandler ConnectionStateHandler
+	stateHandler *DefaultConnectionStateHandler
 }
 
 // NewPeerService creates a new peer service with the given configuration
-func NewPeerService(cfg *config.Config, stateHandler ConnectionStateHandler) PeerService {
-	return &peerService{
+func NewPeerService(cfg *config.Config, stateHandler *DefaultConnectionStateHandler) *PeerService {
+	return &PeerService{
 		config: cfg,
 		stateHandler: stateHandler,
 	}
 }
 
 // CreatePeerConnection creates a new peer connection with the given configuration
-func (p *peerService) CreatePeerConnection(ctx context.Context) (*webrtc.PeerConnection, error) {
+func (p *PeerService) CreatePeerConnection(ctx context.Context) (*webrtc.PeerConnection, error) {
 	webrtcConfig := webrtc.Configuration{
 		ICEServers: p.config.WebRTC.ICEServers,
 	}
@@ -38,7 +38,7 @@ func (p *peerService) CreatePeerConnection(ctx context.Context) (*webrtc.PeerCon
 }
 
 // SetupConnectionStateHandler configures connection state change handling
-func (p *peerService) SetupConnectionStateHandler(pc *webrtc.PeerConnection, role string) {
+func (p *PeerService) SetupConnectionStateHandler(pc *webrtc.PeerConnection, role string) {
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		if p.stateHandler != nil {
 			p.stateHandler.OnStateChange(state, role)
@@ -50,7 +50,7 @@ func (p *peerService) SetupConnectionStateHandler(pc *webrtc.PeerConnection, rol
 }
 
 // Close gracefully closes the peer connection
-func (p *peerService) Close(pc *webrtc.PeerConnection) error {
+func (p *PeerService) Close(pc *webrtc.PeerConnection) error {
 	if pc == nil {
 		return nil
 	}
@@ -58,7 +58,7 @@ func (p *peerService) Close(pc *webrtc.PeerConnection) error {
 }
 
 // defaultStateHandler provides default connection state handling
-func (p *peerService) defaultStateHandler(state webrtc.PeerConnectionState, role string) {
+func (p *PeerService) defaultStateHandler(state webrtc.PeerConnectionState, role string) {
 	fmt.Printf("Peer Connection State has changed: %s (%s)\n", state.String(), role)
 
 	if state == webrtc.PeerConnectionStateFailed {

@@ -14,26 +14,26 @@ import (
 	"yapfs/internal/webrtc"
 )
 
-// senderApp implements SenderApp interface
-type senderApp struct {
+// SenderApp implements sender application logic
+type SenderApp struct {
 	config           *config.Config
-	peerService      webrtc.PeerService
-	dataChannelService webrtc.DataChannelService
-	signalingService webrtc.SignalingService
-	ui               ui.InteractiveUI
-	fileService      file.FileService
+	peerService      *webrtc.PeerService
+	dataChannelService *webrtc.DataChannelService
+	signalingService *webrtc.SignalingService
+	ui               *ui.ConsoleUI
+	fileService      *file.FileService
 }
 
 // NewSenderApp creates a new sender application
 func NewSenderApp(
 	cfg *config.Config,
-	peerService webrtc.PeerService,
-	dataChannelService webrtc.DataChannelService,
-	signalingService webrtc.SignalingService,
-	ui ui.InteractiveUI,
-	fileService file.FileService,
-) SenderApp {
-	return &senderApp{
+	peerService *webrtc.PeerService,
+	dataChannelService *webrtc.DataChannelService,
+	signalingService *webrtc.SignalingService,
+	ui *ui.ConsoleUI,
+	fileService *file.FileService,
+) *SenderApp {
+	return &SenderApp{
 		config:           cfg,
 		peerService:      peerService,
 		dataChannelService: dataChannelService,
@@ -44,7 +44,7 @@ func NewSenderApp(
 }
 
 // Run starts the sender application
-func (s *senderApp) Run(ctx context.Context) error {
+func (s *SenderApp) Run(ctx context.Context) error {
 	s.ui.ShowInstructions("sender")
 
 	// Create peer connection
@@ -112,7 +112,7 @@ func (s *senderApp) Run(ctx context.Context) error {
 }
 
 // RunWithFile starts the sender application to send a specific file
-func (s *senderApp) RunWithFile(ctx context.Context, filePath string) error {
+func (s *SenderApp) RunWithFile(ctx context.Context, filePath string) error {
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return fmt.Errorf("file does not exist: %s", filePath)

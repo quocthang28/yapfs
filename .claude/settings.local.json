@@ -6,7 +6,9 @@
       "Bash(go build:*)",
       "Bash(./yapfs --help)",
       "Bash(./yapfs receive:*)",
-      "Bash(./yapfs send:*)"
+      "Bash(./yapfs send:*)",
+      "Bash(rm:*)",
+      "Bash(git add:*)"
     ],
     "deny": []
   }

@@ -9,16 +9,16 @@ import (
 	"path/filepath"
 )
 
-// fileService implements FileService interface
-type fileService struct{}
+// FileService handles file operations for P2P file sharing
+type FileService struct{}
 
 // NewFileService creates a new file service
-func NewFileService() FileService {
-	return &fileService{}
+func NewFileService() *FileService {
+	return &FileService{}
 }
 
 // OpenReader opens a file for reading and returns file info
-func (f *fileService) OpenReader(filePath string) (FileReader, error) {
+func (f *FileService) OpenReader(filePath string) (*FileReader, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
@@ -30,7 +30,7 @@ func (f *fileService) OpenReader(filePath string) (FileReader, error) {
 		return nil, fmt.Errorf("failed to get file info: %w", err)
 	}
 
-	return &fileReader{
+	return &FileReader{
 		file: file,
 		size: stat.Size(),
 		name: stat.Name(),
@@ -38,7 +38,7 @@ func (f *fileService) OpenReader(filePath string) (FileReader, error) {
 }
 
 // CreateWriter creates a file for writing
-func (f *fileService) CreateWriter(dstPath string) (FileWriter, error) {
+func (f *FileService) CreateWriter(dstPath string) (*FileWriter, error) {
 	// Create directory if it doesn't exist
 	dir := filepath.Dir(dstPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -50,20 +50,20 @@ func (f *fileService) CreateWriter(dstPath string) (FileWriter, error) {
 		return nil, fmt.Errorf("failed to create file: %w", err)
 	}
 
-	return &fileWriter{
+	return &FileWriter{
 		file: file,
 		path: dstPath,
 	}, nil
 }
 
 // GetFileInfo returns information about a file
-func (f *fileService) GetFileInfo(filePath string) (FileInfo, error) {
+func (f *FileService) GetFileInfo(filePath string) (*FileInfo, error) {
 	stat, err := os.Stat(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get file info: %w", err)
 	}
 
-	return &fileInfo{
+	return &FileInfo{
 		name: stat.Name(),
 		size: stat.Size(),
 		path: filePath,
@@ -71,7 +71,7 @@ func (f *fileService) GetFileInfo(filePath string) (FileInfo, error) {
 }
 
 // FormatFileSize formats file size in human readable format
-func (f *fileService) FormatFileSize(size int64) string {
+func (f *FileService) FormatFileSize(size int64) string {
 	const unit = 1024
 	if size < unit {
 		return fmt.Sprintf("%d B", size)
@@ -84,62 +84,62 @@ func (f *fileService) FormatFileSize(size int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(size)/float64(div), "KMGTPE"[exp])
 }
 
-// fileReader implements FileReader interface
-type fileReader struct {
+// FileReader represents a file opened for reading
+type FileReader struct {
 	file *os.File
 	size int64
 	name string
 }
 
-func (f *fileReader) Read(p []byte) (n int, err error) {
+func (f *FileReader) Read(p []byte) (n int, err error) {
 	return f.file.Read(p)
 }
 
-func (f *fileReader) Close() error {
+func (f *FileReader) Close() error {
 	return f.file.Close()
 }
 
-func (f *fileReader) Size() int64 {
+func (f *FileReader) Size() int64 {
 	return f.size
 }
 
-func (f *fileReader) Name() string {
+func (f *FileReader) Name() string {
 	return f.name
 }
 
-// fileWriter implements FileWriter interface
-type fileWriter struct {
+// FileWriter represents a file opened for writing
+type FileWriter struct {
 	file *os.File
 	path string
 }
 
-func (f *fileWriter) Write(p []byte) (n int, err error) {
+func (f *FileWriter) Write(p []byte) (n int, err error) {
 	return f.file.Write(p)
 }
 
-func (f *fileWriter) Close() error {
+func (f *FileWriter) Close() error {
 	return f.file.Close()
 }
 
-func (f *fileWriter) Path() string {
+func (f *FileWriter) Path() string {
 	return f.path
 }
 
-// fileInfo implements FileInfo interface
-type fileInfo struct {
+// FileInfo contains file metadata
+type FileInfo struct {
 	name string
 	size int64
 	path string
 }
 
-func (f *fileInfo) Name() string {
+func (f *FileInfo) Name() string {
 	return f.name
 }
 
-func (f *fileInfo) Size() int64 {
+func (f *FileInfo) Size() int64 {
 	return f.size
 }
 
-func (f *fileInfo) Path() string {
+func (f *FileInfo) Path() string {
 	return f.path
 }

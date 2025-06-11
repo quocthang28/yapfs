@@ -13,20 +13,20 @@ import (
 	webrtcService "yapfs/internal/webrtc"
 )
 
-// consoleUI implements InteractiveUI interface for console-based interaction
-type consoleUI struct {
-	signalingService webrtcService.SignalingService
+// ConsoleUI implements console-based interaction
+type ConsoleUI struct {
+	signalingService *webrtcService.SignalingService
 }
 
 // NewConsoleUI creates a new console-based interactive UI
-func NewConsoleUI(signalingService webrtcService.SignalingService) InteractiveUI {
-	return &consoleUI{
+func NewConsoleUI(signalingService *webrtcService.SignalingService) *ConsoleUI {
+	return &ConsoleUI{
 		signalingService: signalingService,
 	}
 }
 
 // OutputSDP displays an SDP for the user to copy
-func (c *consoleUI) OutputSDP(sd webrtc.SessionDescription, sdpType string) error {
+func (c *ConsoleUI) OutputSDP(sd webrtc.SessionDescription, sdpType string) error {
 	encoded, err := c.signalingService.EncodeSessionDescription(sd)
 	if err != nil {
 		return fmt.Errorf("failed to encode SDP: %w", err)
@@ -40,7 +40,7 @@ func (c *consoleUI) OutputSDP(sd webrtc.SessionDescription, sdpType string) erro
 }
 
 // InputSDP prompts the user to paste an SDP
-func (c *consoleUI) InputSDP(sdpType string) (webrtc.SessionDescription, error) {
+func (c *ConsoleUI) InputSDP(sdpType string) (webrtc.SessionDescription, error) {
 	fmt.Printf("\nPaste the %s SDP from the other peer and press Enter:\n", sdpType)
 	fmt.Print("> ")
 
@@ -57,12 +57,12 @@ func (c *consoleUI) InputSDP(sdpType string) (webrtc.SessionDescription, error) 
 }
 
 // ShowMessage displays a message to the user
-func (c *consoleUI) ShowMessage(message string) {
+func (c *ConsoleUI) ShowMessage(message string) {
 	fmt.Println(message)
 }
 
 // ShowInstructions displays instructions for the current operation
-func (c *consoleUI) ShowInstructions(role string) {
+func (c *ConsoleUI) ShowInstructions(role string) {
 	switch role {
 	case "sender":
 		fmt.Println("YAPFS - P2P File Sharing (Sender)")
@@ -91,7 +91,7 @@ func (c *consoleUI) ShowInstructions(role string) {
 }
 
 // WaitForUserInput waits for user confirmation before proceeding
-func (c *consoleUI) WaitForUserInput(prompt string) {
+func (c *ConsoleUI) WaitForUserInput(prompt string) {
 	if prompt == "" {
 		prompt = "Press Enter to continue..."
 	}
