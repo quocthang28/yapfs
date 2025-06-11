@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/pion/webrtc/v4"
@@ -32,8 +33,23 @@ func (c *ConsoleUI) OutputSDP(sd webrtc.SessionDescription, sdpType string) erro
 		return fmt.Errorf("failed to encode SDP: %w", err)
 	}
 
-	fmt.Printf("\n%s SDP (copy this and send to the other peer):\n", sdpType)
+	// Save to file to bypass shell character limits
+	filename := fmt.Sprintf("%s_sdp.txt", strings.ToLower(sdpType))
+	filePath := filepath.Join(".", filename)
+	
+	err = os.WriteFile(filePath, []byte(encoded), 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write SDP to file: %w", err)
+	}
+
+	fmt.Printf("\n%s SDP:\n", sdpType)
 	fmt.Println("========================================")
+	fmt.Printf("✓ Saved to file: %s\n", filename)
+	fmt.Printf("✓ File size: %d characters\n", len(encoded))
+	fmt.Println("========================================")
+	fmt.Printf("Options to share:\n")
+	fmt.Printf("1. Copy from file: cat %s\n", filename)
+	fmt.Printf("2. Direct copy (if your shell supports it):\n")
 	fmt.Println(encoded)
 	fmt.Println("========================================")
 	return nil
@@ -41,7 +57,60 @@ func (c *ConsoleUI) OutputSDP(sd webrtc.SessionDescription, sdpType string) erro
 
 // InputSDP prompts the user to paste an SDP
 func (c *ConsoleUI) InputSDP(sdpType string) (webrtc.SessionDescription, error) {
-	fmt.Printf("\nPaste the %s SDP from the other peer (multiple lines, press Enter after last line, then Ctrl+D or type 'END'):\n", sdpType)
+	expectedFilename := fmt.Sprintf("%s_sdp.txt", strings.ToLower(sdpType))
+	
+	fmt.Printf("\nOptions to input %s SDP:\n", sdpType)
+	fmt.Println("========================================")
+	fmt.Printf("1. From file (recommended): Place SDP in '%s' and press Enter\n", expectedFilename)
+	fmt.Printf("2. Manual paste: Type/paste SDP directly, then type 'END'\n")
+	fmt.Println("========================================")
+	fmt.Print("Choose option (1 for file, 2 for manual, or just press Enter for file): ")
+
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Scan()
+	choice := strings.TrimSpace(scanner.Text())
+	
+	// Default to file option if empty or "1"
+	if choice == "" || choice == "1" {
+		return c.inputSDPFromFile(expectedFilename)
+	}
+	
+	// Manual input option
+	return c.inputSDPManually(sdpType)
+}
+
+// inputSDPFromFile reads SDP from a file
+func (c *ConsoleUI) inputSDPFromFile(filename string) (webrtc.SessionDescription, error) {
+	// Check if file exists
+	if _, err := os.Stat(filename); os.IsNotExist(err) {
+		fmt.Printf("File '%s' not found. Please create it with the SDP content and try again.\n", filename)
+		return webrtc.SessionDescription{}, fmt.Errorf("SDP file not found: %s", filename)
+	}
+	
+	// Read SDP from file
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		return webrtc.SessionDescription{}, fmt.Errorf("failed to read SDP file: %w", err)
+	}
+	
+	encoded := strings.TrimSpace(string(content))
+	if len(encoded) == 0 {
+		return webrtc.SessionDescription{}, fmt.Errorf("SDP file is empty")
+	}
+	
+	fmt.Printf("✓ Read SDP from file '%s' (%d characters)\n", filename, len(encoded))
+	
+	sd, err := c.signalingService.DecodeSessionDescription(encoded)
+	if err != nil {
+		return sd, fmt.Errorf("failed to decode SDP from file: %w", err)
+	}
+	
+	return sd, nil
+}
+
+// inputSDPManually handles manual SDP input
+func (c *ConsoleUI) inputSDPManually(sdpType string) (webrtc.SessionDescription, error) {
+	fmt.Printf("Paste the %s SDP (multiple lines allowed, type 'END' when done):\n", sdpType)
 	fmt.Print("> ")
 
 	var lines []string
@@ -90,21 +159,23 @@ func (c *ConsoleUI) ShowInstructions(role string) {
 		fmt.Println("================================")
 		fmt.Println("This instance will create an SDP offer and send the file to the receiver.")
 		fmt.Println("Instructions:")
-		fmt.Println("1. Copy ALL lines of the offer SDP that will be displayed")
-		fmt.Println("2. Send it to the receiver instance (via any communication method)")
-		fmt.Println("3. Get the answer SDP from the receiver (also multiple lines)")
-		fmt.Println("4. Paste ALL lines back here when prompted, then type 'END' or press Ctrl+D")
+		fmt.Println("1. Offer SDP will be saved to 'offer_sdp.txt' and displayed")
+		fmt.Println("2. Send the file content to receiver (via any communication method)")
+		fmt.Println("3. Get the answer SDP from receiver and save it as 'answer_sdp.txt'")
+		fmt.Println("4. When prompted, choose file input option (recommended) or manual paste")
 		fmt.Println("5. File transfer will begin automatically once connected")
+		fmt.Println("Note: File-based SDP exchange avoids shell character limits")
 	case "receiver":
 		fmt.Println("YAPFS - P2P File Sharing (Receiver)")
 		fmt.Println("===================================")
 		fmt.Println("This instance will respond to an SDP offer and receive the file from the sender.")
 		fmt.Println("Instructions:")
-		fmt.Println("1. Get the offer SDP from the sender instance (multiple lines)")
-		fmt.Println("2. Paste ALL lines here when prompted, then type 'END' or press Ctrl+D")
-		fmt.Println("3. Copy ALL lines of the answer SDP that will be displayed")
-		fmt.Println("4. Send it back to the sender instance")
+		fmt.Println("1. Get the offer SDP from sender and save it as 'offer_sdp.txt'")
+		fmt.Println("2. When prompted, choose file input option (recommended) or manual paste")
+		fmt.Println("3. Answer SDP will be saved to 'answer_sdp.txt' and displayed")
+		fmt.Println("4. Send the answer file content back to the sender")
 		fmt.Println("5. File will be saved to the specified destination once received")
+		fmt.Println("Note: File-based SDP exchange avoids shell character limits")
 	default:
 		fmt.Printf("YAPFS - P2P File Sharing (%s Mode)\n", strings.ToUpper(role[:1])+role[1:])
 	}
