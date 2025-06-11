@@ -45,8 +45,17 @@ func (c *ConsoleUI) InputSDP(sdpType string) (webrtc.SessionDescription, error) 
 	fmt.Print("> ")
 
 	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Scan()
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return webrtc.SessionDescription{}, fmt.Errorf("failed to read input: %w", err)
+		}
+		return webrtc.SessionDescription{}, fmt.Errorf("no input received")
+	}
+	
 	encoded := strings.TrimSpace(scanner.Text())
+	if encoded == "" {
+		return webrtc.SessionDescription{}, fmt.Errorf("empty SDP input")
+	}
 
 	sd, err := c.signalingService.DecodeSessionDescription(encoded)
 	if err != nil {
@@ -85,7 +94,7 @@ func (c *ConsoleUI) ShowInstructions(role string) {
 		fmt.Println("4. Send it back to the sender instance")
 		fmt.Println("5. File will be saved to the specified destination once received")
 	default:
-		fmt.Printf("YAPFS - P2P File Sharing (%s Mode)\n", strings.Title(role))
+		fmt.Printf("YAPFS - P2P File Sharing (%s Mode)\n", strings.ToUpper(role[:1])+role[1:])
 	}
 	fmt.Println()
 }
