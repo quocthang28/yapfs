@@ -73,7 +73,6 @@ func validateSendFlags(flags *SendFlags) error {
 
 // runSenderApp creates and runs the sender application
 func runSenderApp(flags *SendFlags) error {
-	ctx := createContext()
 	peerService, dataChannelService, signalingService, ui, dataProcessor := createServices()
 
 	// Future flag processing can be easily added here:
@@ -91,5 +90,5 @@ func runSenderApp(flags *SendFlags) error {
 	}
 
 	senderApp := app.NewSenderApp(cfg, peerService, dataChannelService, signalingService, ui, dataProcessor)
-	return senderApp.Run(ctx, opts)
+	return senderApp.Run( opts)
 }

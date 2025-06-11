@@ -108,7 +108,6 @@ func init() {
 
 // runReceiverApp creates and runs the receiver application
 func runReceiverApp(flags *ReceiveFlags) error {
-	ctx := createContext()
 	peerService, dataChannelService, signalingService, ui, dataProcessor := createServices()
 
 	// Future flag processing can be easily added here:
@@ -126,5 +125,5 @@ func runReceiverApp(flags *ReceiveFlags) error {
 	}
 
 	receiverApp := app.NewReceiverApp(cfg, peerService, dataChannelService, signalingService, ui, dataProcessor)
-	return receiverApp.Run(ctx, opts)
+	return receiverApp.Run(opts)
 }

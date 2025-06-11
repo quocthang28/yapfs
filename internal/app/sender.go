@@ -1,14 +1,13 @@
 package app
 
 import (
-	"context"
 	"fmt"
 	"os"
 
 	"yapfs/internal/config"
 	"yapfs/internal/processor"
-	"yapfs/internal/ui"
 	"yapfs/internal/transport"
+	"yapfs/internal/ui"
 )
 
 // SenderOptions configures the sender application behavior
@@ -49,7 +48,7 @@ func NewSenderApp(
 }
 
 // Run starts the sender application with the given options
-func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
+func (s *SenderApp) Run(opts *SenderOptions) error {
 	// Validate required options
 	if opts.FilePath == "" {
 		return fmt.Errorf("file path is required")
@@ -61,7 +60,7 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	s.ui.ShowMessage(fmt.Sprintf("Preparing to send file: %s", opts.FilePath))
 
 	// Create peer connection
-	peerConn, err := s.peerService.CreatePeerConnection(ctx)
+	peerConn, err := s.peerService.CreatePeerConnection()
 	if err != nil {
 		return fmt.Errorf("failed to create peer connection: %w", err)
 	}
@@ -80,23 +79,20 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 		return fmt.Errorf("failed to create file sender data channel: %w", err)
 	}
 
-	err = s.dataChannelService.SetupFileSender(dataChannel, s.dataProcessor, opts.FilePath)
+	doneCh, err := s.dataChannelService.SetupFileSender(dataChannel, s.dataProcessor, opts.FilePath)
 	if err != nil {
 		return fmt.Errorf("failed to setup file sender: %w", err)
 	}
 
 	// Create offer
-	_, err = s.signalingService.CreateOffer(ctx, peerConn)
+	_, err = s.signalingService.CreateOffer(peerConn)
 	if err != nil {
 		return fmt.Errorf("failed to create offer: %w", err)
 	}
 
 	// Wait for ICE gathering to complete
 	s.ui.ShowMessage("Gathering ICE candidates...")
-	err = s.signalingService.WaitForICEGathering(ctx, peerConn)
-	if err != nil {
-		return fmt.Errorf("failed to gather ICE candidates: %w", err)
-	}
+	<-s.signalingService.WaitForICEGathering(peerConn)
 
 	// Get the final offer with ICE candidates
 	finalOffer := peerConn.LocalDescription()
@@ -135,7 +131,8 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	// Show ready message
 	s.ui.ShowMessage("Sender is ready. File will start sending when the data channel opens.")
 
-	// Block until context is cancelled
-	<-ctx.Done()
-	return ctx.Err()
+	// Wait for transfer completion
+	<-doneCh
+	s.ui.ShowMessage("File transfer completed successfully")
+	return nil
 }

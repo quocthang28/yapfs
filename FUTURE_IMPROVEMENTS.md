@@ -340,11 +340,272 @@ func (c *CloudflareSignaling) GetAnswer(id string) (*webrtc.SessionDescription, 
 - **HTTPS only**: Ensure all communication uses HTTPS
 - **No sensitive data**: Only store ephemeral SDP data, never file content
 
+#### Session Management and Real-time Communication
+
+##### WebSocket vs HTTPS Approach
+
+**Option 1: WebSocket-based Session Management (Recommended for Trickle ICE)**
+```javascript
+// Cloudflare Worker with WebSocket support for real-time candidate exchange
+export default {
+  async fetch(request, env) {
+    const upgradeHeader = request.headers.get('Upgrade');
+    
+    if (upgradeHeader !== 'websocket') {
+      return handleHTTPRequest(request, env);
+    }
+    
+    // Handle WebSocket connection for real-time signaling
+    const [client, server] = Object.values(new WebSocketPair());
+    
+    server.addEventListener('message', async (event) => {
+      const data = JSON.parse(event.data);
+      
+      switch (data.type) {
+        case 'join-session':
+          await handleSessionJoin(data.sessionId, server, env);
+          break;
+        case 'offer':
+        case 'answer':
+        case 'ice-candidate':
+          await relayToOtherPeer(data, env);
+          break;
+      }
+    });
+    
+    server.accept();
+    return new Response(null, { status: 101, webSocket: client });
+  }
+};
+
+async function handleSessionJoin(sessionId, socket, env) {
+  // Store socket connection for session
+  await env.SESSIONS.put(`session:${sessionId}:socket`, socket);
+  
+  // Enable trickle ICE candidate exchange
+  socket.send(JSON.stringify({
+    type: 'session-ready',
+    trickleICE: true
+  }));
+}
+
+async function relayToOtherPeer(data, env) {
+  // Real-time relay of offers, answers, and ICE candidates
+  const otherPeerSocket = await env.SESSIONS.get(`session:${data.sessionId}:other`);
+  if (otherPeerSocket) {
+    otherPeerSocket.send(JSON.stringify(data));
+  }
+}
+```
+
+**YAPFS WebSocket Integration:**
+```go
+type WebSocketSignaling struct {
+    WorkerURL   string
+    SessionID   string
+    conn        *websocket.Conn
+    candidateCh chan *webrtc.ICECandidate
+    offerCh     chan *webrtc.SessionDescription
+    answerCh    chan *webrtc.SessionDescription
+}
+
+func (w *WebSocketSignaling) ConnectToSession(sessionID string) error {
+    wsURL := strings.Replace(w.WorkerURL, "https://", "wss://", 1)
+    conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+    if err != nil {
+        return fmt.Errorf("failed to connect to signaling server: %w", err)
+    }
+    
+    w.conn = conn
+    w.SessionID = sessionID
+    
+    // Join session
+    joinMsg := map[string]string{
+        "type": "join-session",
+        "sessionId": sessionID,
+    }
+    
+    return w.conn.WriteJSON(joinMsg)
+}
+
+func (w *WebSocketSignaling) SetupTrickleICE(pc *webrtc.PeerConnection) {
+    // Enable real-time ICE candidate exchange
+    pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+        if candidate == nil {
+            return // End of candidates
+        }
+        
+        // Send candidate immediately to other peer
+        candidateMsg := map[string]interface{}{
+            "type": "ice-candidate",
+            "sessionId": w.SessionID,
+            "candidate": candidate.ToJSON(),
+        }
+        
+        w.conn.WriteJSON(candidateMsg)
+    })
+    
+    // Listen for incoming candidates
+    go w.listenForCandidates(pc)
+}
+
+func (w *WebSocketSignaling) listenForCandidates(pc *webrtc.PeerConnection) {
+    for {
+        var msg map[string]interface{}
+        err := w.conn.ReadJSON(&msg)
+        if err != nil {
+            return
+        }
+        
+        if msg["type"] == "ice-candidate" {
+            candidateData := msg["candidate"].(map[string]interface{})
+            candidate := webrtc.ICECandidateInit{
+                Candidate: candidateData["candidate"].(string),
+                SDPMid:    candidateData["sdpMid"].(*string),
+                SDPMLineIndex: candidateData["sdpMLineIndex"].(*uint16),
+            }
+            
+            pc.AddICECandidate(candidate)
+        }
+    }
+}
+```
+
+**Option 2: HTTPS Polling-based Session Management (Simpler Implementation)**
+```javascript
+// Traditional HTTP-based approach with polling for session state
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    const [, action, sessionId] = url.pathname.split('/');
+    
+    switch (action) {
+      case 'create-session':
+        return await createSession(sessionId, env);
+      case 'join-session':
+        return await joinSession(sessionId, env);
+      case 'offer':
+        return await handleOffer(sessionId, request, env);
+      case 'answer':
+        return await handleAnswer(sessionId, request, env);
+      case 'candidates':
+        return await handleCandidates(sessionId, request, env);
+      case 'poll':
+        return await pollSessionState(sessionId, env);
+    }
+  }
+};
+
+async function createSession(sessionId, env) {
+  const session = {
+    id: sessionId,
+    created: Date.now(),
+    participants: 0,
+    state: 'waiting'
+  };
+  
+  await env.SESSIONS_KV.put(`session:${sessionId}`, JSON.stringify(session), {
+    expirationTtl: 900 // 15 minutes
+  });
+  
+  return new Response(JSON.stringify({ success: true, sessionId }));
+}
+
+async function pollSessionState(sessionId, env) {
+  // Long polling for session updates
+  const session = await env.SESSIONS_KV.get(`session:${sessionId}`);
+  
+  if (!session) {
+    return new Response('Session not found', { status: 404 });
+  }
+  
+  return new Response(session, {
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
+```
+
+**YAPFS HTTP Polling Integration:**
+```go
+type HTTPPollingSignaling struct {
+    WorkerURL string
+    SessionID string
+    pollInterval time.Duration
+}
+
+func (h *HTTPPollingSignaling) PollForUpdates(ctx context.Context) {
+    ticker := time.NewTicker(h.pollInterval)
+    defer ticker.Stop()
+    
+    for {
+        select {
+        case <-ctx.Done():
+            return
+        case <-ticker.C:
+            h.checkForUpdates()
+        }
+    }
+}
+
+func (h *HTTPPollingSignaling) checkForUpdates() {
+    resp, err := http.Get(fmt.Sprintf("%s/poll/%s", h.WorkerURL, h.SessionID))
+    if err != nil {
+        return
+    }
+    defer resp.Body.Close()
+    
+    var update SessionUpdate
+    json.NewDecoder(resp.Body).Decode(&update)
+    
+    // Process offers, answers, or candidates
+    h.processUpdate(update)
+}
+```
+
+##### Comparison: WebSocket vs HTTPS
+
+**WebSocket Advantages:**
+- **Real-time communication**: Immediate candidate exchange for optimal trickle ICE
+- **Lower latency**: No polling delays
+- **Efficient**: Single persistent connection
+- **Better for trickle ICE**: Natural fit for streaming candidate updates
+
+**HTTPS Polling Advantages:**
+- **Simpler implementation**: Standard HTTP requests
+- **Better reliability**: No connection state to manage
+- **Firewall friendly**: Works through most corporate firewalls
+- **Easier debugging**: Standard HTTP tools work
+
+**Recommended Approach:**
+- **Phase 1**: HTTPS polling for basic SDP exchange (simpler to implement)
+- **Phase 2**: WebSocket upgrade for trickle ICE support (performance optimization)
+
+##### Usage Examples
+
+**WebSocket-based Session:**
+```bash
+# Sender creates and joins session with real-time signaling
+./yapfs send --file video.mp4 --session abc123 --signaling wss://worker.example.com
+
+# Receiver joins same session for instant candidate exchange
+./yapfs receive --dst ./downloads/ --session abc123 --signaling wss://worker.example.com
+```
+
+**HTTPS-based Session:**
+```bash
+# Sender with HTTP polling (fallback mode)
+./yapfs send --file video.mp4 --session abc123 --signaling https://worker.example.com
+
+# Receiver polls for updates
+./yapfs receive --dst ./downloads/ --session abc123 --signaling https://worker.example.com
+```
+
 #### Implementation Priority
-1. **Phase 1**: Basic Cloudflare Worker + KV setup
-2. **Phase 2**: YAPFS integration with `--session` flag
-3. **Phase 3**: Enhanced security and rate limiting
-4. **Phase 4**: Optional: Web UI for even simpler session sharing
+1. **Phase 1**: Basic Cloudflare Worker + KV setup with HTTPS polling
+2. **Phase 2**: YAPFS integration with `--session` flag and HTTP signaling
+3. **Phase 3**: WebSocket upgrade for real-time trickle ICE support
+4. **Phase 4**: Enhanced security and rate limiting
+5. **Phase 5**: Optional: Web UI for even simpler session sharing
 
 ## 5. WebRTC Connection Reliability
 

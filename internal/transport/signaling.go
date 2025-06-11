@@ -1,7 +1,6 @@
 package transport
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -18,7 +17,7 @@ func NewSignalingService() *SignalingService {
 }
 
 // CreateOffer creates and sets an SDP offer for the peer connection
-func (s *SignalingService) CreateOffer(ctx context.Context, peerConn *webrtc.PeerConnection) (*webrtc.SessionDescription, error) {
+func (s *SignalingService) CreateOffer(peerConn *webrtc.PeerConnection) (*webrtc.SessionDescription, error) {
 	offer, err := peerConn.CreateOffer(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create offer: %w", err)
@@ -33,7 +32,7 @@ func (s *SignalingService) CreateOffer(ctx context.Context, peerConn *webrtc.Pee
 }
 
 // CreateAnswer creates and sets an SDP answer for the peer connection
-func (s *SignalingService) CreateAnswer(ctx context.Context, peerConn *webrtc.PeerConnection) (*webrtc.SessionDescription, error) {
+func (s *SignalingService) CreateAnswer(peerConn *webrtc.PeerConnection) (*webrtc.SessionDescription, error) {
 	answer, err := peerConn.CreateAnswer(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create answer: %w", err)
@@ -57,13 +56,8 @@ func (s *SignalingService) SetRemoteDescription(peerConn *webrtc.PeerConnection,
 }
 
 // WaitForICEGathering waits for ICE candidate gathering to complete
-func (s *SignalingService) WaitForICEGathering(ctx context.Context, peerConn *webrtc.PeerConnection) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-webrtc.GatheringCompletePromise(peerConn):
-		return nil
-	}
+func (s *SignalingService) WaitForICEGathering(peerConn *webrtc.PeerConnection) <-chan struct{} {
+	return webrtc.GatheringCompletePromise(peerConn)
 }
 
 // EncodeSessionDescription encodes a session description to base64

@@ -1,13 +1,12 @@
 package app
 
 import (
-	"context"
 	"fmt"
 
 	"yapfs/internal/config"
 	"yapfs/internal/processor"
-	"yapfs/internal/ui"
 	"yapfs/internal/transport"
+	"yapfs/internal/ui"
 )
 
 // ReceiverOptions configures the receiver application behavior
@@ -48,7 +47,7 @@ func NewReceiverApp(
 }
 
 // Run starts the receiver application with the given options
-func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
+func (r *ReceiverApp) Run(opts *ReceiverOptions) error {
 	// Validate required options
 	if opts.DstPath == "" {
 		return fmt.Errorf("destination path is required")
@@ -57,7 +56,7 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	r.ui.ShowMessage(fmt.Sprintf("Preparing to receive file to: %s", opts.DstPath))
 
 	// Create peer connection
-	peerConn, err := r.peerService.CreatePeerConnection(ctx)
+	peerConn, err := r.peerService.CreatePeerConnection()
 	if err != nil {
 		return fmt.Errorf("failed to create peer connection: %w", err)
 	}
@@ -94,17 +93,14 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	}
 
 	// Create answer
-	_, err = r.signalingService.CreateAnswer(ctx, peerConn)
+	_, err = r.signalingService.CreateAnswer(peerConn)
 	if err != nil {
 		return fmt.Errorf("failed to create answer: %w", err)
 	}
 
 	// Wait for ICE gathering to complete
 	r.ui.ShowMessage("Gathering ICE candidates...")
-	err = r.signalingService.WaitForICEGathering(ctx, peerConn)
-	if err != nil {
-		return fmt.Errorf("failed to gather ICE candidates: %w", err)
-	}
+	<-r.signalingService.WaitForICEGathering(peerConn)
 
 	// Get the final answer with ICE candidates
 	finalAnswer := peerConn.LocalDescription()
@@ -125,12 +121,8 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 
 	r.ui.ShowMessage("Receiver is ready. Waiting for file transfer...")
 
-	// Wait for either transfer completion or context cancellation
-	select {
-	case <-doneCh:
-		r.ui.ShowMessage("File transfer completed successfully")
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	// Wait for transfer completion
+	<-doneCh
+	r.ui.ShowMessage("File transfer completed successfully")
+	return nil
 }

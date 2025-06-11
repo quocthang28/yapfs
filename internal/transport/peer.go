@@ -1,7 +1,6 @@
 package transport
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -25,7 +24,7 @@ func NewPeerService(cfg *config.Config, stateHandler *DefaultConnectionStateHand
 }
 
 // CreatePeerConnection creates a new peer connection with the given configuration
-func (p *PeerService) CreatePeerConnection(ctx context.Context) (*webrtc.PeerConnection, error) {
+func (p *PeerService) CreatePeerConnection() (*webrtc.PeerConnection, error) {
 	webrtcConfig := webrtc.Configuration{
 		ICEServers: p.config.WebRTC.ICEServers,
 	}

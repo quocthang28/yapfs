@@ -39,9 +39,10 @@ func (s *SenderChannel) CreateFileSenderDataChannel(peerConn *webrtc.PeerConnect
 	return dataChannel, nil
 }
 
-// SetupFileSender configures file sending for a data channel
-func (s *SenderChannel) SetupFileSender(dataChannel *webrtc.DataChannel, dataProcessor *processor.DataProcessor, filePath string) error {
+// SetupFileSender configures file sending for a data channel and returns a completion channel
+func (s *SenderChannel) SetupFileSender(dataChannel *webrtc.DataChannel, dataProcessor *processor.DataProcessor, filePath string) (<-chan struct{}, error) {
 	sendMoreCh := make(chan struct{}, 1)
+	doneCh := make(chan struct{})
 
 	// OnOpen sets an event handler which is invoked when the underlying data transport has been established (or re-established).
 	dataChannel.OnOpen(func() {
@@ -77,6 +78,7 @@ func (s *SenderChannel) SetupFileSender(dataChannel *webrtc.DataChannel, dataPro
 					} else {
 						log.Printf("File transfer complete: %d bytes sent", totalBytesSent)
 					}
+					close(doneCh)
 					break
 				}
 				if err != nil {
@@ -110,5 +112,5 @@ func (s *SenderChannel) SetupFileSender(dataChannel *webrtc.DataChannel, dataPro
 		}
 	})
 
-	return nil
+	return doneCh, nil
 }

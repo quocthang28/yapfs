@@ -1,12 +1,8 @@
 package cmd
 
 import (
-	"context"
-	"fmt"
 	"log"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"yapfs/internal/config"
 	"yapfs/internal/processor"
@@ -95,21 +91,21 @@ func Execute() {
 }
 
 // createContext creates a context that cancels on interrupt signals
-func createContext() context.Context {
-	ctx, cancel := context.WithCancel(context.Background())
+// func createContext() context.Context {
+// 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Setup signal handling
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+// 	// Setup signal handling
+// 	sigChan := make(chan os.Signal, 1)
+// 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	go func() {
-		<-sigChan
-		fmt.Println("\nReceived interrupt signal, shutting down...")
-		cancel()
-	}()
+// 	go func() {
+// 		<-sigChan
+// 		fmt.Println("\nReceived interrupt signal, shutting down...")
+// 		cancel()
+// 	}()
 
-	return ctx
-}
+// 	return ctx
+// }
 
 // createServices creates and wires up all the application services
 func createServices() (*transport.PeerService, *transport.DataChannelService, *transport.SignalingService, *ui.ConsoleUI, *processor.DataProcessor) {
