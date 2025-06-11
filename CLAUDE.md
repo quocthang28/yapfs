@@ -74,15 +74,19 @@ Manages file operations for P2P file sharing:
 - Handles directory creation for destination paths
 
 #### **SenderApp/ReceiverApp** (`internal/app/`)
-Coordinate the complete file transfer application flow:
-- **SenderApp**: Orchestrates offer creation, file sending, and connection management
-- **ReceiverApp**: Handles answer generation, file receiving, and completion signaling
-- Both coordinate between WebRTC, UI, and file services
+Coordinate the complete file transfer application flow using a flexible options-based approach:
+- **SenderApp**: Orchestrates offer creation, file sending, and connection management via `Run(ctx, *SenderOptions)`
+- **ReceiverApp**: Handles answer generation, file receiving, and completion signaling via `Run(ctx, *ReceiverOptions)`
+- **SenderOptions**: Configuration struct with required `FilePath` field for extensibility
+- **ReceiverOptions**: Configuration struct with required `DstPath` field for extensibility
+- Both coordinate between WebRTC, UI, and file services with unified run methods
 
 ### Design Principles
 - **Direct dependency injection**: Concrete types are injected directly without interfaces
 - **Separation of concerns**: Clear boundaries between CLI, app logic, WebRTC, file handling, and UI
-- **Configuration management**: Centralized config with validation
+- **Options-based API**: Flexible configuration using struct-based options pattern
+- **Configuration management**: Centralized config with validation, environment variable support via Viper
+- **Flag handling**: Struct-based flag definitions with built-in Cobra validation
 - **Error handling**: Proper error propagation with context
 - **Exported types**: All service types are exported for direct usage
 
@@ -101,6 +105,18 @@ Send a file:
 Receive a file:
 ```bash
 ./yapfs receive --dst /path/to/save/received/file
+```
+
+Optional configuration file support:
+```bash
+./yapfs send --file /path/to/file --config /path/to/config.yaml
+./yapfs receive --dst /path/to/file --config ~/.yapfs.yaml
+```
+
+Environment variable support:
+```bash
+YAPFS_SEND_FILE=/path/to/file ./yapfs send
+YAPFS_RECEIVE_DST=/path/to/save ./yapfs receive
 ```
 
 The program will:
@@ -170,6 +186,91 @@ for {
 
 This approach allows efficient transfer of files of any size while maintaining stable memory usage and preventing network congestion.
 
+## Code Organization
+
+### Application Layer Pattern
+The application follows a clean layered architecture:
+
+1. **CLI Layer** (`cmd/`): Flag parsing, validation, and user interface
+2. **Application Layer** (`internal/app/`): Business logic orchestration with options pattern
+3. **Service Layer** (`internal/webrtc/`, `internal/file/`, `internal/ui/`): Domain-specific services
+4. **Configuration Layer** (`internal/config/`): Centralized configuration management
+
+### Extensibility Guidelines
+When adding new features:
+
+1. **New Flags**: Add to flag structs in `cmd/` files with comments for future expansion
+2. **New Options**: Add to options structs in `internal/app/` files
+3. **Validation**: Use Cobra's `PreRunE` for flag validation
+4. **Services**: Create new services in appropriate `internal/` subdirectories
+5. **Configuration**: Add new config fields to `internal/config/config.go`
+
+This pattern ensures maintainable, testable code with clear separation of concerns.
+
+## CLI Architecture
+
+### Flag Handling
+The application uses a modern, flexible flag handling approach:
+
+#### Command Structure
+```go
+type SendFlags struct {
+    FilePath string // Required: path to file to send
+    // Future flags can be easily added here:
+    // Verbose  bool
+    // Timeout  int
+}
+
+type ReceiveFlags struct {
+    DstPath string // Required: destination path to save file
+    // Future flags can be easily added here:
+    // Verbose  bool
+    // Timeout  int
+}
+```
+
+#### Application Options
+```go
+type SenderOptions struct {
+    FilePath string // Required: path to file to send
+}
+
+type ReceiverOptions struct {
+    DstPath string // Required: destination path to save file
+}
+```
+
+#### Unified Run Methods
+- **SenderApp.Run(ctx, *SenderOptions)**: Single method handles all sender functionality
+- **ReceiverApp.Run(ctx, *ReceiverOptions)**: Single method handles all receiver functionality
+- No duplicate logic between different run methods
+- Extensible design for future feature additions
+
+### Configuration Support
+- **Viper integration**: Environment variable support with `YAPFS_` prefix
+- **Config files**: YAML configuration files (default: `~/.yapfs.yaml`)
+- **Cobra validation**: Built-in flag validation using `PreRunE`
+- **Extensible**: Easy to add new flags without code duplication
+
 ## Dependencies
 
-This example uses the Pion WebRTC library (`github.com/pion/webrtc/v4`). The module dependencies are managed at the parent directory level in the main pion/webrtc project.
+Core dependencies:
+- **Pion WebRTC**: `github.com/pion/webrtc/v4` - WebRTC implementation
+- **Cobra**: `github.com/spf13/cobra` - CLI framework
+- **Viper**: `github.com/spf13/viper` - Configuration management
+
+## Future Improvements
+
+A comprehensive roadmap of planned enhancements is documented in `FUTURE_IMPROVEMENTS.md`, including:
+
+### Planned Features
+1. **File Data Integrity**: SHA-256 checksums, chunk verification, resume capability for interrupted transfers
+2. **Enhanced Security**: Peer authentication, application-layer encryption, path validation, directory traversal protection
+3. **Automated SDP Exchange**: Cloudflare Worker + KV integration for seamless session sharing without manual copy/paste
+
+### Implementation Priority
+- **Short term**: File integrity verification, basic security hardening, Cloudflare Worker SDP exchange
+- **Medium term**: Resume capability, peer authentication mechanisms  
+- **Long term**: Advanced encryption, rate limiting, web UI
+
+Reference `FUTURE_IMPROVEMENTS.md` for detailed implementation specifications, security considerations, and architectural guidance for these enhancements.

@@ -11,9 +11,18 @@ import (
 	"yapfs/internal/app"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
-var dstPath string
+type ReceiveFlags struct {
+	DstPath string
+	// Future flags can be easily added here:
+	// Verbose  bool
+	// Timeout  int
+	// Port     int
+}
+
+var receiveFlags ReceiveFlags
 
 // receiveCmd represents the receive command
 var receiveCmd = &cobra.Command{
@@ -27,21 +36,27 @@ var receiveCmd = &cobra.Command{
 4. Receive and save the file once connected
 
 Use --dst to specify where to save the received file.`,
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		return validateReceiveFlags(&receiveFlags)
+	},
 	Run: func(cmd *cobra.Command, args []string) {
-		if dstPath == "" {
-			log.Fatal("--dst flag is required")
-		}
-		
-		// Validate dst path
-		if err := validateDstPath(dstPath); err != nil {
-			log.Fatalf("Invalid destination path: %v", err)
-		}
-		
-		log.Printf("Starting receiver, will save to: %s", dstPath)
-		if err := runReceiverApp(dstPath); err != nil {
+		log.Printf("Starting receiver, will save to: %s", receiveFlags.DstPath)
+		if err := runReceiverApp(&receiveFlags); err != nil {
 			log.Fatalf("Receiver failed: %v", err)
 		}
 	},
+}
+
+// validateReceiveFlags validates the receive command flags
+func validateReceiveFlags(flags *ReceiveFlags) error {
+	if flags.DstPath == "" {
+		return fmt.Errorf("destination path is required")
+	}
+	// Future validations can be easily added here:
+	// if flags.Timeout <= 0 {
+	//     return fmt.Errorf("timeout must be positive")
+	// }
+	return validateDstPath(flags.DstPath)
 }
 
 // validateDstPath ensures the destination path is valid for file creation
@@ -79,15 +94,40 @@ func validateDstPath(dstPath string) error {
 
 func init() {
 	rootCmd.AddCommand(receiveCmd)
-	receiveCmd.Flags().StringVarP(&dstPath, "dst", "d", "", "Destination path to save received file (required)")
+	
+	// Define flags with struct binding
+	receiveCmd.Flags().StringVarP(&receiveFlags.DstPath, "dst", "d", "", "Destination path to save received file (required)")
+	
+	// Mark required flags
 	receiveCmd.MarkFlagRequired("dst")
+	
+	// Bind flags to viper for environment variable support
+	viper.BindPFlag("receive.dst", receiveCmd.Flags().Lookup("dst"))
+	
+	// Future flag bindings can be easily added here:
+	// viper.BindPFlag("receive.verbose", receiveCmd.Flags().Lookup("verbose"))
+	// viper.BindPFlag("receive.timeout", receiveCmd.Flags().Lookup("timeout"))
 }
 
 // runReceiverApp creates and runs the receiver application
-func runReceiverApp(dstPath string) error {
+func runReceiverApp(flags *ReceiveFlags) error {
 	ctx := createContext()
 	peerService, dataChannelService, signalingService, ui, fileService := createServices()
 
+	// Future flag processing can be easily added here:
+	// if flags.Verbose {
+	//     log.Printf("Verbose mode enabled")
+	//     // Configure services for verbose logging
+	// }
+	// if flags.Timeout > 0 {
+	//     // Apply timeout to context or services
+	// }
+
+	// Create receiver options from flags
+	opts := &app.ReceiverOptions{
+		DstPath: flags.DstPath,
+	}
+
 	receiverApp := app.NewReceiverApp(cfg, peerService, dataChannelService, signalingService, ui, fileService)
-	return receiverApp.RunWithDest(ctx, dstPath)
+	return receiverApp.Run(ctx, opts)
 }

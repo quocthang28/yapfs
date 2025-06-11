@@ -17,10 +17,12 @@ import (
 	"yapfs/internal/webrtc"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var (
 	cfg *config.Config
+	cfgFile string
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -39,12 +41,52 @@ Usage:
 
 Both peers will exchange SDP offers/answers manually to establish the connection.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		// Initialize viper configuration
+		initConfig()
+		
 		// Initialize configuration
 		cfg = config.NewDefaultConfig()
 		if err := cfg.Validate(); err != nil {
 			log.Fatalf("Invalid configuration: %v", err)
 		}
 	},
+}
+
+func init() {
+	// Add global flags
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.yapfs.yaml)")
+	
+	// Set up viper environment variable support
+	viper.SetEnvPrefix("YAPFS")
+	viper.AutomaticEnv()
+}
+
+// initConfig reads in config file and ENV variables
+func initConfig() {
+	if cfgFile != "" {
+		// Use config file from the flag
+		viper.SetConfigFile(cfgFile)
+	} else {
+		// Find home directory
+		home, err := os.UserHomeDir()
+		if err != nil {
+			log.Printf("Warning: Could not find home directory: %v", err)
+			return
+		}
+		
+		// Search config in home directory with name ".yapfs" (without extension)
+		viper.AddConfigPath(home)
+		viper.SetConfigType("yaml")
+		viper.SetConfigName(".yapfs")
+	}
+	
+	// Read in environment variables that match
+	viper.AutomaticEnv()
+	
+	// If a config file is found, read it in
+	if err := viper.ReadInConfig(); err == nil {
+		log.Printf("Using config file: %s", viper.ConfigFileUsed())
+	}
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.

@@ -8,7 +8,9 @@
       "Bash(./yapfs receive:*)",
       "Bash(./yapfs send:*)",
       "Bash(rm:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git push:*)",
+      "Bash(go run:*)"
     ],
     "deny": []
   }
