@@ -93,12 +93,28 @@ func (c *ConsoleUI) inputSDPFromFile(filename string) (webrtc.SessionDescription
 		return webrtc.SessionDescription{}, fmt.Errorf("failed to read SDP file: %w", err)
 	}
 	
-	encoded := strings.TrimSpace(string(content))
-	if len(encoded) == 0 {
-		return webrtc.SessionDescription{}, fmt.Errorf("SDP file is empty")
+	// Clean up the content - extract only valid base64 characters
+	rawContent := string(content)
+	var cleanedLines []string
+	
+	for _, line := range strings.Split(rawContent, "\n") {
+		line = strings.TrimSpace(line)
+		// Skip empty lines and lines that don't look like base64
+		if len(line) == 0 || strings.Contains(line, "No newline") || strings.Contains(line, "file") {
+			continue
+		}
+		// Only include lines that contain valid base64 characters
+		if c.isValidBase64Line(line) {
+			cleanedLines = append(cleanedLines, line)
+		}
 	}
 	
-	fmt.Printf("✓ Read SDP from file '%s' (%d characters)\n", filename, len(encoded))
+	encoded := strings.Join(cleanedLines, "")
+	if len(encoded) == 0 {
+		return webrtc.SessionDescription{}, fmt.Errorf("no valid base64 content found in SDP file")
+	}
+	
+	fmt.Printf("✓ Read SDP from file '%s' (%d characters after cleanup)\n", filename, len(encoded))
 	
 	sd, err := c.signalingService.DecodeSessionDescription(encoded)
 	if err != nil {
@@ -106,6 +122,23 @@ func (c *ConsoleUI) inputSDPFromFile(filename string) (webrtc.SessionDescription
 	}
 	
 	return sd, nil
+}
+
+// isValidBase64Line checks if a line contains only valid base64 characters
+func (c *ConsoleUI) isValidBase64Line(line string) bool {
+	if len(line) == 0 {
+		return false
+	}
+	
+	for _, char := range line {
+		if !((char >= 'A' && char <= 'Z') || 
+			 (char >= 'a' && char <= 'z') || 
+			 (char >= '0' && char <= '9') || 
+			 char == '+' || char == '/' || char == '=') {
+			return false
+		}
+	}
+	return true
 }
 
 // inputSDPManually handles manual SDP input
