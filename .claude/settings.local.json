@@ -10,7 +10,9 @@
       "Bash(rm:*)",
       "Bash(git add:*)",
       "Bash(git push:*)",
-      "Bash(go run:*)"
+      "Bash(go run:*)",
+      "Bash(sed:*)",
+      "Bash(grep:*)"
     ],
     "deny": []
   }

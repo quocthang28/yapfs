@@ -24,13 +24,14 @@ yapfs/
 │   ├── config/
 │   │   └── config.go       # Configuration management
 │   ├── file/               # File handling service layer
-│   │   └── service.go      # File operations, readers, writers
+│   │   └── file.go         # File operations, readers, writers
 │   ├── webrtc/             # WebRTC service layer
 │   │   ├── peer.go         # Peer connection service
 │   │   ├── data_channel.go # Data channel + flow control
 │   │   └── signaling.go    # SDP exchange service
 │   └── ui/                 # User interface layer
-│       └── interactive.go  # Console-based UI implementation
+│       ├── interactive.go  # Console-based UI implementation
+│       └── progress.go     # Progress reporting and display
 └── main.go                 # Minimal entry point
 ```
 
@@ -65,7 +66,14 @@ Handles user input/output for SDP exchange:
 - Shows instructional messages and progress updates
 - Provides console-based interactive experience
 
-#### **FileService** (`internal/file/service.go`)
+#### **ProgressReporter** (`internal/ui/progress.go`)
+Provides standardized progress reporting interface for file transfers:
+- Defines common interface for progress reporting across different UI implementations
+- Handles progress updates with throughput, bytes transferred, and completion percentage
+- Reports errors and completion status with consistent formatting
+- Supports console-based progress reporting with emoji indicators
+
+#### **FileService** (`internal/file/file.go`)
 Manages file operations for P2P file sharing:
 - Opens files for reading with metadata (FileReader)
 - Creates files for writing (FileWriter)
@@ -81,9 +89,133 @@ Coordinate the complete file transfer application flow using a flexible options-
 - **ReceiverOptions**: Configuration struct with required `DstPath` field for extensibility
 - Both coordinate between WebRTC, UI, and file services with unified run methods
 
+### Service Interactions and Dependencies
+
+The application uses **direct dependency injection** with concrete service types. Services coordinate through well-defined method calls and channel-based communication for asynchronous operations.
+
+#### Service Dependency Graph
+```
+SenderApp/ReceiverApp (orchestrators)
+├── PeerService (manages WebRTC connections)
+├── SignalingService (handles SDP exchange)  
+├── DataChannelService (manages data transfer & flow control)
+├── ConsoleUI (user interaction)
+└── FileService (file I/O operations)
+
+Config → PeerService, DataChannelService
+DefaultConnectionStateHandler → PeerService
+```
+
+#### Service Instantiation (in `cmd/root.go`)
+Services are created and injected using concrete constructors:
+
+```go
+func createServices() (*webrtc.PeerService, *webrtc.DataChannelService, *webrtc.SignalingService, *ui.ConsoleUI, *file.FileService) {
+    stateHandler := &webrtc.DefaultConnectionStateHandler{}
+    signalingService := webrtc.NewSignalingService()
+    peerService := webrtc.NewPeerService(cfg, stateHandler)
+    consoleUI := ui.NewConsoleUI()
+    dataChannelService := webrtc.NewDataChannelService(cfg)
+    fileService := file.NewFileService()
+    
+    return peerService, dataChannelService, signalingService, consoleUI, fileService
+}
+```
+
+#### Send Operation Service Flow
+
+1. **Connection Setup**
+   ```go
+   // PeerService creates and monitors WebRTC connection
+   pc, err := s.peerService.CreatePeerConnection(ctx)
+   s.peerService.SetupConnectionStateHandler(pc, "sender")
+   ```
+
+2. **Data Channel Creation** 
+   ```go
+   // DataChannelService sets up file sender with progress channels
+   progressCh := make(chan webrtc.ProgressUpdate, 1)
+   completionUpdateCh := make(chan webrtc.CompletionUpdate, 1)
+   _, err = s.dataChannelService.CreateFileSenderDataChannel(pc, "fileTransfer", 
+       s.fileService, opts.FilePath, progressCh, completionUpdateCh)
+   ```
+
+3. **SDP Exchange**
+   ```go
+   // SignalingService creates offer and waits for ICE gathering
+   _, err = s.signalingService.CreateOffer(ctx, pc)
+   err = s.signalingService.WaitForICEGathering(ctx, pc)
+   encodedOffer, err := s.signalingService.EncodeSessionDescription(*finalOffer)
+   
+   // ConsoleUI handles user interaction
+   err = s.ui.OutputSDP(encodedOffer, "Offer")
+   answer, err := s.ui.InputSDP("Answer")
+   
+   // SignalingService processes answer
+   answerSD, err := s.signalingService.DecodeSessionDescription(answer)
+   err = s.signalingService.SetRemoteDescription(pc, answerSD)
+   ```
+
+4. **File Transfer** (automatic when data channel opens)
+   - DataChannelService coordinates with FileService for chunked reading
+   - Progress updates flow through channels to ConsoleUI
+   - Flow control prevents buffer overflow
+
+#### Receive Operation Service Flow
+
+1. **Setup and SDP Exchange**
+   ```go
+   // PeerService creates connection
+   pc, err := r.peerService.CreatePeerConnection(ctx)
+   
+   // DataChannelService sets up receiver handlers
+   throughputCh := make(chan float64, 1)
+   completionUpdateCh := make(chan webrtc.CompletionUpdate, 1)
+   completionCh, err := r.dataChannelService.SetupFileReceiverWithCompletion(pc, 
+       r.fileService, opts.DstPath, throughputCh, completionUpdateCh)
+   
+   // ConsoleUI and SignalingService handle SDP exchange
+   offer, err := r.ui.InputSDP("Offer")
+   // ... SignalingService processes offer and creates answer
+   ```
+
+2. **File Reception** (automatic when data channel receives data)
+   - DataChannelService handles incoming data channel messages
+   - FileService creates writer and handles file I/O
+   - Transfer completes on "EOF" message
+
+#### Key Communication Patterns
+
+**Channel-Based Updates:**
+```go
+// Services communicate asynchronously via typed channels
+type ProgressUpdate struct {
+    BytesSent   int64
+    BytesTotal  int64  
+    Throughput  float64
+    Percentage  float64
+}
+
+// Progress flows: DataChannelService → progressCh → ConsoleUI
+```
+
+**Flow Control Coordination:**
+```go
+// DataChannelService implements backpressure
+if dataChannel.BufferedAmount() > d.config.WebRTC.MaxBufferedAmount {
+    <-sendMoreCh  // Wait for buffer to drain
+}
+```
+
+**Error Propagation:**
+- Services return errors to App layer for handling
+- Connection state changes trigger cleanup across services
+- UI displays errors with consistent formatting
+
 ### Design Principles
 - **Direct dependency injection**: Concrete types are injected directly without interfaces
 - **Separation of concerns**: Clear boundaries between CLI, app logic, WebRTC, file handling, and UI
+- **Channel-based coordination**: Asynchronous communication via Go channels for progress/status updates
 - **Options-based API**: Flexible configuration using struct-based options pattern
 - **Configuration management**: Centralized config with validation, environment variable support via Viper
 - **Flag handling**: Struct-based flag definitions with built-in Cobra validation

@@ -128,7 +128,108 @@ func (s *SecureFileTransfer) ValidatePath(path string) error {
 - **Transfer quotas**: Limit file sizes and transfer counts
 - **Audit logging**: Log all transfer attempts and outcomes
 
-## 3. SDP Exchange via Cloudflare Worker + KV
+## 3. Enhanced UI with Progress Bar and Transfer Statistics
+
+### Current State
+- Basic console output with simple throughput reporting
+- No visual progress indication during file transfers
+- Limited transfer statistics and ETA information
+- Progress updates interrupt console flow
+
+### Proposed UI Improvements
+
+#### Real-time Progress Bar
+- **Visual progress indicator**: ASCII progress bar showing transfer completion percentage
+- **Live statistics**: Real-time display of transfer speed, bytes transferred, and remaining time
+- **Non-intrusive updates**: Progress bar updates in-place without scrolling console
+- **Completion summary**: Final transfer statistics upon completion
+
+#### Implementation Design
+```go
+type ProgressInfo struct {
+    BytesTransferred int64
+    TotalBytes       int64
+    ThroughputMbps   float64
+    Percentage       float64
+    ElapsedTime      time.Duration
+    ETADuration      time.Duration
+}
+
+type ProgressReporter interface {
+    StartProgressDisplay(totalBytes int64)
+    UpdateProgress(info ProgressInfo)
+    StopProgressDisplay()
+    ShowTransferComplete(bytesTransferred int64, elapsedTime time.Duration)
+}
+```
+
+#### Progress Bar Features
+- **Visual bar**: `[===========>           ] 45.2% 2.1MB/5.0MB 1.5MB/s 1m23s ETA: 2m10s`
+- **Dynamic width**: Adjusts to terminal width for optimal display
+- **Smart formatting**: Human-readable file sizes (KB, MB, GB) and time durations
+- **Error handling**: Graceful fallback for non-terminal environments
+
+#### Enhanced Data Channel Integration
+```go
+// Enhanced throughput reporter with progress callbacks
+type ProgressAwareReporter struct {
+    ui              ProgressReporter
+    totalBytes      int64
+    startTime       time.Time
+    lastUpdateTime  time.Time
+}
+
+func (p *ProgressAwareReporter) OnThroughputUpdate(mbps float64, bytesTransferred int64) {
+    elapsed := time.Since(p.startTime)
+    percentage := float64(bytesTransferred) / float64(p.totalBytes) * 100
+    
+    // Calculate ETA based on current throughput
+    remainingBytes := p.totalBytes - bytesTransferred
+    eta := time.Duration(float64(remainingBytes) / (mbps * 1024 * 1024 / 8)) * time.Second
+    
+    progress := ProgressInfo{
+        BytesTransferred: bytesTransferred,
+        TotalBytes:       p.totalBytes,
+        ThroughputMbps:   mbps,
+        Percentage:       percentage,
+        ElapsedTime:      elapsed,
+        ETADuration:      eta,
+    }
+    
+    p.ui.UpdateProgress(progress)
+}
+```
+
+#### Console Management
+- **Line clearing**: Proper ANSI escape sequences to clear and update progress line
+- **Message handling**: Temporary progress bar clearing for status messages
+- **Terminal detection**: Fallback to simple text output for non-interactive terminals
+
+#### Benefits
+- **Better user experience**: Clear visual feedback during transfers
+- **Informed waiting**: Users can see progress and estimated completion time
+- **Professional appearance**: Modern CLI tool appearance with real-time updates
+- **Transfer insights**: Detailed statistics help users understand performance
+
+#### Implementation Example
+```bash
+# Sender with progress bar
+$ ./yapfs send --file large_video.mp4
+Starting file transfer (Total: 1.2 GB)...
+[=============>      ] 67.3% 823MB/1.2GB 15.2MB/s 54s ETA: 26s
+
+# Receiver with progress bar  
+$ ./yapfs receive --dst ./downloads/
+Ready to receive file...
+[==========>         ] 52.1% 425MB/816MB 12.8MB/s 33s ETA: 31s
+
+✓ Transfer complete!
+  Total: 1.2 GB
+  Time: 1m21s  
+  Avg Speed: 15.8 MB/s
+```
+
+## 4. SDP Exchange via Cloudflare Worker + KV
 
 ### Current Limitations
 - Manual copy/paste of SDP is error-prone and cumbersome
@@ -237,24 +338,24 @@ func (c *CloudflareSignaling) GetAnswer(id string) (*webrtc.SessionDescription, 
 - [ ] File integrity verification (checksums)
 - [ ] Basic path security and validation
 - [ ] Cloudflare Worker SDP exchange
+- [ ] Enhanced UI with progress bar and transfer statistics
 
 ### Medium Term
 - [ ] Resume capability for interrupted transfers
 - [ ] Peer authentication mechanisms
 - [ ] Enhanced security hardening
+- [ ] Advanced progress features (terminal width detection, color support)
 
 ### Long Term
 - [ ] Application-layer encryption
 - [ ] Advanced security features (rate limiting, quotas)
-- [ ] Web UI for session management
+- [ ] Rich terminal UI with multiple progress bars for concurrent transfers
 
 ## Contributing
 
 When implementing these improvements:
-
-1. **Maintain backward compatibility** where possible
 3. **Follow existing code patterns** and architecture
 4. **Add comprehensive tests** for security-critical features
 5. **Update documentation** including CLI help and README
 
-Each improvement should be implemented as a separate feature with appropriate configuration flags to maintain the tool's simplicity while adding power-user capabilities.
+Each improvement should be implemented as a separate feature with appropriate configuration flags to maintain the tool's simplicity while adding power-user capabilities.ư

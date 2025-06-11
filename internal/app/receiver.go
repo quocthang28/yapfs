@@ -1,6 +1,3 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
-// SPDX-License-Identifier: MIT
-
 package app
 
 import (
@@ -23,12 +20,12 @@ type ReceiverOptions struct {
 
 // ReceiverApp implements receiver application logic
 type ReceiverApp struct {
-	config           *config.Config
-	peerService      *webrtc.PeerService
+	config             *config.Config
+	peerService        *webrtc.PeerService
 	dataChannelService *webrtc.DataChannelService
-	signalingService *webrtc.SignalingService
-	ui               *ui.ConsoleUI
-	fileService      *file.FileService
+	signalingService   *webrtc.SignalingService
+	ui                 *ui.ConsoleUI
+	fileService        *file.FileService
 }
 
 // NewReceiverApp creates a new receiver application
@@ -41,12 +38,12 @@ func NewReceiverApp(
 	fileService *file.FileService,
 ) *ReceiverApp {
 	return &ReceiverApp{
-		config:           cfg,
-		peerService:      peerService,
+		config:             cfg,
+		peerService:        peerService,
 		dataChannelService: dataChannelService,
-		signalingService: signalingService,
-		ui:               ui,
-		fileService:      fileService,
+		signalingService:   signalingService,
+		ui:                 ui,
+		fileService:        fileService,
 	}
 }
 
@@ -73,8 +70,29 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	// Setup connection state handler
 	r.peerService.SetupConnectionStateHandler(pc, "receiver")
 
-	// Setup file receiver with completion tracking
-	completionCh, err := r.dataChannelService.SetupFileReceiverWithCompletion(pc, r.fileService, opts.DstPath)
+	// Setup file receiver with progress and completion tracking channels
+	progressCh := make(chan webrtc.ProgressUpdate, 1)
+	completionUpdateCh := make(chan webrtc.CompletionUpdate, 1)
+
+	// Handle progress updates
+	go func() {
+		for update := range progressCh {
+			r.ui.UpdateProgress(update.Progress, update.Throughput, update.BytesSent, update.BytesTotal)
+		}
+	}()
+
+	// Handle completion updates
+	go func() {
+		for update := range completionUpdateCh {
+			if update.Error != nil {
+				r.ui.ShowMessage(fmt.Sprintf("Transfer error: %v", update.Error))
+			} else {
+				r.ui.ShowMessage(update.Message)
+			}
+		}
+	}()
+
+	completionCh, err := r.dataChannelService.SetupFileReceiver(pc, r.fileService, opts.DstPath, progressCh, completionUpdateCh)
 	if err != nil {
 		return fmt.Errorf("failed to setup file receiver data channel handler: %w", err)
 	}
@@ -85,8 +103,13 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 		return fmt.Errorf("failed to get offer SDP: %w", err)
 	}
 
-	// Set remote description
-	err = r.signalingService.SetRemoteDescription(pc, offer)
+	// Decode and set remote description
+	offerSD, err := r.signalingService.DecodeSessionDescription(offer)
+	if err != nil {
+		return fmt.Errorf("failed to decode offer SDP: %w", err)
+	}
+
+	err = r.signalingService.SetRemoteDescription(pc, offerSD)
 	if err != nil {
 		return fmt.Errorf("failed to set remote description: %w", err)
 	}
@@ -110,8 +133,13 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 		return fmt.Errorf("local description is nil after ICE gathering")
 	}
 
-	// Display answer SDP for user to copy
-	err = r.ui.OutputSDP(*finalAnswer, "Answer")
+	// Encode and display answer SDP for user to copy
+	encodedAnswer, err := r.signalingService.EncodeSessionDescription(*finalAnswer)
+	if err != nil {
+		return fmt.Errorf("failed to encode answer SDP: %w", err)
+	}
+
+	err = r.ui.OutputSDP(encodedAnswer, "Answer")
 	if err != nil {
 		return fmt.Errorf("failed to output answer SDP: %w", err)
 	}
@@ -119,6 +147,11 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	r.ui.ShowMessage("Receiver is ready. Waiting for file transfer...")
 
 	// Wait for either transfer completion or context cancellation
+	defer func() {
+		close(progressCh)
+		close(completionUpdateCh)
+	}()
+
 	select {
 	case <-completionCh:
 		r.ui.ShowMessage("File transfer completed successfully")

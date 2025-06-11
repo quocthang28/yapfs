@@ -1,135 +1,176 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
-// SPDX-License-Identifier: MIT
-
 package ui
 
 import (
 	"bufio"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
-
-	"github.com/pion/webrtc/v4"
-	webrtcService "yapfs/internal/webrtc"
 )
 
-// ConsoleUI implements console-based interaction
+// ConsoleUI implements simple console-based interactive UI
 type ConsoleUI struct {
-	signalingService *webrtcService.SignalingService
+	// Pure UI - no service dependencies
 }
 
 // NewConsoleUI creates a new console-based interactive UI
-func NewConsoleUI(signalingService *webrtcService.SignalingService) *ConsoleUI {
-	return &ConsoleUI{
-		signalingService: signalingService,
-	}
+func NewConsoleUI() *ConsoleUI {
+	return &ConsoleUI{}
 }
 
-// OutputSDP displays an SDP for the user to copy
-func (c *ConsoleUI) OutputSDP(sd webrtc.SessionDescription, sdpType string) error {
-	encoded, err := c.signalingService.EncodeSessionDescription(sd)
-	if err != nil {
-		return fmt.Errorf("failed to encode SDP: %w", err)
-	}
-
-	// Save to file to bypass shell character limits
-	filename := fmt.Sprintf("%s_sdp.txt", strings.ToLower(sdpType))
-	filePath := filepath.Join(".", filename)
+// ShowInstructions displays initial instructions for the given role
+func (c *ConsoleUI) ShowInstructions(role string) {
+	fmt.Printf("\n=== YAPFS - P2P File Sharing ===\n\n")
 	
-	err = os.WriteFile(filePath, []byte(encoded), 0644)
+	if role == "sender" {
+		fmt.Printf("This instance will create an SDP offer and send the file.\n\n")
+		fmt.Printf("Instructions:\n")
+		fmt.Printf("1. Offer SDP will be generated and displayed\n")
+		fmt.Printf("2. Share the SDP with the receiver (via file or copy/paste)\n")
+		fmt.Printf("3. Enter the answer SDP from receiver\n")
+		fmt.Printf("4. File transfer will begin automatically\n\n")
+	} else {
+		fmt.Printf("This instance will respond to an SDP offer and receive the file.\n\n")
+		fmt.Printf("Instructions:\n")
+		fmt.Printf("1. Enter the offer SDP from sender\n")
+		fmt.Printf("2. Answer SDP will be generated and displayed\n")
+		fmt.Printf("3. Share the answer SDP back to sender (via file or copy/paste)\n")
+		fmt.Printf("4. File will be saved to destination\n\n")
+	}
+	
+	fmt.Printf("Press Enter to continue...")
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Scan()
+}
+
+// OutputSDP displays the generated SDP for sharing
+func (c *ConsoleUI) OutputSDP(encoded string, sdpType string) error {
+
+	// Save to file
+	filename := fmt.Sprintf("%s_sdp.txt", strings.ToLower(sdpType))
+	err := os.WriteFile(filename, []byte(encoded), 0644)
 	if err != nil {
 		return fmt.Errorf("failed to write SDP to file: %w", err)
 	}
 
-	fmt.Printf("\n%s SDP:\n", sdpType)
-	fmt.Println("========================================")
-	fmt.Printf("✓ Saved to file: %s\n", filename)
-	fmt.Printf("✓ File size: %d characters\n", len(encoded))
-	fmt.Println("========================================")
-	fmt.Printf("Options to share:\n")
-	fmt.Printf("1. Copy from file: cat %s\n", filename)
-	fmt.Printf("2. Direct copy (if your shell supports it):\n")
-	fmt.Println(encoded)
-	fmt.Println("========================================")
+	fmt.Printf("\n=== %s SDP Generated ===\n\n", sdpType)
+	fmt.Printf("✓ %s SDP saved to: %s\n", sdpType, filename)
+	fmt.Printf("✓ %s SDP size: %d characters\n\n", sdpType, len(encoded))
+	
+	fmt.Printf("Share this SDP with the other peer:\n\n")
+	
+	// Show truncated SDP for reference
+	displaySDP := encoded
+	if len(displaySDP) > 200 {
+		displaySDP = displaySDP[:200] + "..."
+	}
+	fmt.Printf("%s\n\n", displaySDP)
+	
+	fmt.Printf("Press Enter to continue to next step...")
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Scan()
+	
 	return nil
 }
 
-// InputSDP prompts the user to paste an SDP
-func (c *ConsoleUI) InputSDP(sdpType string) (webrtc.SessionDescription, error) {
-	expectedFilename := fmt.Sprintf("%s_sdp.txt", strings.ToLower(sdpType))
+// InputSDP prompts user to input SDP and returns the raw SDP string
+func (c *ConsoleUI) InputSDP(sdpType string) (string, error) {
+	fmt.Printf("\n=== Enter %s SDP ===\n\n", sdpType)
 	
-	fmt.Printf("\nOptions to input %s SDP:\n", sdpType)
-	fmt.Println("========================================")
-	fmt.Printf("1. From file (recommended): Place SDP in '%s' and press Enter\n", expectedFilename)
-	fmt.Printf("2. Manual paste: Type/paste SDP directly, then type 'END'\n")
-	fmt.Println("========================================")
-	fmt.Print("Choose option (1 for file, 2 for manual, or just press Enter for file): ")
-
+	filename := fmt.Sprintf("%s_sdp.txt", strings.ToLower(sdpType))
+	
+	fmt.Printf("Options to provide SDP:\n\n")
+	fmt.Printf("1. 📁 File input (recommended): ")
+	
+	// Check if file exists
+	if _, err := os.Stat(filename); err == nil {
+		fmt.Printf("✅ File detected\n")
+	} else {
+		fmt.Printf("❌ File not found\n")
+	}
+	
+	fmt.Printf("   Place SDP content in '%s'\n\n", filename)
+	fmt.Printf("2. Manual input: Type SDP content and press Enter\n\n")
+	
+	fmt.Printf("Press Enter to process SDP...")
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Scan()
-	choice := strings.TrimSpace(scanner.Text())
 	
-	// Default to file option if empty or "1"
-	if choice == "" || choice == "1" {
-		return c.inputSDPFromFile(expectedFilename)
+	// Try file input first
+	if content, err := os.ReadFile(filename); err == nil {
+		cleaned := cleanSDPContent(string(content))
+		if len(cleaned) > 0 {
+			fmt.Printf("✓ Successfully loaded SDP from file\n")
+			return cleaned, nil
+		}
 	}
 	
-	// Manual input option
-	return c.inputSDPManually(sdpType)
+	// Fall back to manual input
+	fmt.Printf("\nNo valid SDP found in file. Please enter SDP manually:\n")
+	fmt.Printf("(Paste SDP content and press Enter)\n> ")
+	
+	scanner.Scan()
+	input := scanner.Text()
+	
+	if input == "" {
+		return "", fmt.Errorf("no SDP provided")
+	}
+	
+	cleaned := cleanSDPContent(input)
+	if len(cleaned) == 0 {
+		return "", fmt.Errorf("invalid SDP format")
+	}
+	
+	fmt.Printf("✓ Successfully parsed SDP\n")
+	return cleaned, nil
 }
 
-// inputSDPFromFile reads SDP from a file
-func (c *ConsoleUI) inputSDPFromFile(filename string) (webrtc.SessionDescription, error) {
-	// Check if file exists
-	if _, err := os.Stat(filename); os.IsNotExist(err) {
-		fmt.Printf("File '%s' not found. Please create it with the SDP content and try again.\n", filename)
-		return webrtc.SessionDescription{}, fmt.Errorf("SDP file not found: %s", filename)
+// ShowMessage displays a message to the user
+func (c *ConsoleUI) ShowMessage(message string) {
+	fmt.Printf("ℹ️  %s\n", message)
+}
+
+// WaitForUserInput waits for user to press Enter
+func (c *ConsoleUI) WaitForUserInput(prompt string) {
+	if prompt == "" {
+		prompt = "Press Enter to continue..."
+	}
+	fmt.Printf("\n%s\n", prompt)
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Scan()
+}
+
+// UpdateProgress displays current transfer progress
+func (c *ConsoleUI) UpdateProgress(progress, throughput float64, bytesSent, bytesTotal int64) {
+	// Create a simple progress bar
+	barWidth := 50
+	filled := int(progress * float64(barWidth) / 100)
+	if filled > barWidth {
+		filled = barWidth
 	}
 	
-	// Read SDP from file
-	content, err := os.ReadFile(filename)
-	if err != nil {
-		return webrtc.SessionDescription{}, fmt.Errorf("failed to read SDP file: %w", err)
-	}
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
 	
-	// Clean up the content - extract only valid base64 characters
-	rawContent := string(content)
+	fmt.Printf("\r[%s] %.1f%% | %.2f Mbps | %s / %s", 
+		bar, progress, throughput, 
+		formatBytes(bytesSent), formatBytes(bytesTotal))
+}
+
+// Helper functions
+func cleanSDPContent(content string) string {
 	var cleanedLines []string
-	
-	for _, line := range strings.Split(rawContent, "\n") {
+	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)
-		// Skip empty lines and lines that don't look like base64
-		if len(line) == 0 || strings.Contains(line, "No newline") || strings.Contains(line, "file") {
-			continue
-		}
-		// Only include lines that contain valid base64 characters
-		if c.isValidBase64Line(line) {
+		if len(line) > 0 && isValidBase64Line(line) {
 			cleanedLines = append(cleanedLines, line)
 		}
 	}
-	
-	encoded := strings.Join(cleanedLines, "")
-	if len(encoded) == 0 {
-		return webrtc.SessionDescription{}, fmt.Errorf("no valid base64 content found in SDP file")
-	}
-	
-	fmt.Printf("✓ Read SDP from file '%s' (%d characters after cleanup)\n", filename, len(encoded))
-	
-	sd, err := c.signalingService.DecodeSessionDescription(encoded)
-	if err != nil {
-		return sd, fmt.Errorf("failed to decode SDP from file: %w", err)
-	}
-	
-	return sd, nil
+	return strings.Join(cleanedLines, "")
 }
 
-// isValidBase64Line checks if a line contains only valid base64 characters
-func (c *ConsoleUI) isValidBase64Line(line string) bool {
+func isValidBase64Line(line string) bool {
 	if len(line) == 0 {
 		return false
 	}
-	
 	for _, char := range line {
 		if !((char >= 'A' && char <= 'Z') || 
 			 (char >= 'a' && char <= 'z') || 
@@ -141,86 +182,15 @@ func (c *ConsoleUI) isValidBase64Line(line string) bool {
 	return true
 }
 
-// inputSDPManually handles manual SDP input
-func (c *ConsoleUI) inputSDPManually(sdpType string) (webrtc.SessionDescription, error) {
-	fmt.Printf("Paste the %s SDP (multiple lines allowed, type 'END' when done):\n", sdpType)
-	fmt.Print("> ")
-
-	var lines []string
-	scanner := bufio.NewScanner(os.Stdin)
-	
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "END" {
-			break
-		}
-		if line != "" {
-			lines = append(lines, line)
-		}
+func formatBytes(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
 	}
-	
-	if err := scanner.Err(); err != nil {
-		return webrtc.SessionDescription{}, fmt.Errorf("failed to read input: %w", err)
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
 	}
-	
-	if len(lines) == 0 {
-		return webrtc.SessionDescription{}, fmt.Errorf("no SDP input received")
-	}
-	
-	// Combine all lines into single base64 string
-	encoded := strings.Join(lines, "")
-	
-	sd, err := c.signalingService.DecodeSessionDescription(encoded)
-	if err != nil {
-		return sd, fmt.Errorf("failed to decode SDP: %w", err)
-	}
-
-	return sd, nil
-}
-
-
-// ShowMessage displays a message to the user
-func (c *ConsoleUI) ShowMessage(message string) {
-	fmt.Println(message)
-}
-
-// ShowInstructions displays instructions for the current operation
-func (c *ConsoleUI) ShowInstructions(role string) {
-	switch role {
-	case "sender":
-		fmt.Println("YAPFS - P2P File Sharing (Sender)")
-		fmt.Println("================================")
-		fmt.Println("This instance will create an SDP offer and send the file to the receiver.")
-		fmt.Println("Instructions:")
-		fmt.Println("1. Offer SDP will be saved to 'offer_sdp.txt' and displayed")
-		fmt.Println("2. Send the file content to receiver (via any communication method)")
-		fmt.Println("3. Get the answer SDP from receiver and save it as 'answer_sdp.txt'")
-		fmt.Println("4. When prompted, choose file input option (recommended) or manual paste")
-		fmt.Println("5. File transfer will begin automatically once connected")
-		fmt.Println("Note: File-based SDP exchange avoids shell character limits")
-	case "receiver":
-		fmt.Println("YAPFS - P2P File Sharing (Receiver)")
-		fmt.Println("===================================")
-		fmt.Println("This instance will respond to an SDP offer and receive the file from the sender.")
-		fmt.Println("Instructions:")
-		fmt.Println("1. Get the offer SDP from sender and save it as 'offer_sdp.txt'")
-		fmt.Println("2. When prompted, choose file input option (recommended) or manual paste")
-		fmt.Println("3. Answer SDP will be saved to 'answer_sdp.txt' and displayed")
-		fmt.Println("4. Send the answer file content back to the sender")
-		fmt.Println("5. File will be saved to the specified destination once received")
-		fmt.Println("Note: File-based SDP exchange avoids shell character limits")
-	default:
-		fmt.Printf("YAPFS - P2P File Sharing (%s Mode)\n", strings.ToUpper(role[:1])+role[1:])
-	}
-	fmt.Println()
-}
-
-// WaitForUserInput waits for user confirmation before proceeding
-func (c *ConsoleUI) WaitForUserInput(prompt string) {
-	if prompt == "" {
-		prompt = "Press Enter to continue..."
-	}
-	fmt.Printf("\n%s\n", prompt)
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Scan()
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }

@@ -1,6 +1,3 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
-// SPDX-License-Identifier: MIT
-
 package cmd
 
 import (
@@ -119,15 +116,13 @@ func createServices() (*webrtc.PeerService, *webrtc.DataChannelService, *webrtc.
 	// Create connection state handler
 	stateHandler := &webrtc.DefaultConnectionStateHandler{}
 
-	// Create throughput reporter
-	throughputReporter := &webrtc.DefaultThroughputReporter{}
-
 	// Create services
 	signalingService := webrtc.NewSignalingService()
 	peerService := webrtc.NewPeerService(cfg, stateHandler)
-	dataChannelService := webrtc.NewDataChannelService(cfg, throughputReporter)
-	ui := ui.NewConsoleUI(signalingService)
+	consoleUI := ui.NewConsoleUI()
+	
+	dataChannelService := webrtc.NewDataChannelService(cfg)
 	fileService := file.NewFileService()
 
-	return peerService, dataChannelService, signalingService, ui, fileService
+	return peerService, dataChannelService, signalingService, consoleUI, fileService
 }

@@ -1,6 +1,3 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
-// SPDX-License-Identifier: MIT
-
 package app
 
 import (
@@ -24,12 +21,12 @@ type SenderOptions struct {
 
 // SenderApp implements sender application logic
 type SenderApp struct {
-	config           *config.Config
-	peerService      *webrtc.PeerService
+	config             *config.Config
+	peerService        *webrtc.PeerService
 	dataChannelService *webrtc.DataChannelService
-	signalingService *webrtc.SignalingService
-	ui               *ui.ConsoleUI
-	fileService      *file.FileService
+	signalingService   *webrtc.SignalingService
+	ui                 *ui.ConsoleUI
+	fileService        *file.FileService
 }
 
 // NewSenderApp creates a new sender application
@@ -42,12 +39,12 @@ func NewSenderApp(
 	fileService *file.FileService,
 ) *SenderApp {
 	return &SenderApp{
-		config:           cfg,
-		peerService:      peerService,
+		config:             cfg,
+		peerService:        peerService,
 		dataChannelService: dataChannelService,
-		signalingService: signalingService,
-		ui:               ui,
-		fileService:      fileService,
+		signalingService:   signalingService,
+		ui:                 ui,
+		fileService:        fileService,
 	}
 }
 
@@ -77,10 +74,35 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	// Setup connection state handler
 	s.peerService.SetupConnectionStateHandler(pc, "sender")
 
-	// Create data channel for file transfer
-	_, err = s.dataChannelService.CreateFileSenderDataChannel(pc, "fileTransfer", s.fileService, opts.FilePath)
+	// Create data channel for file transfer with channels
+	progressCh := make(chan webrtc.ProgressUpdate, 1)
+	completionUpdateCh := make(chan webrtc.CompletionUpdate, 1)
+
+	// Start goroutines to handle channel updates
+	go func() {
+		for update := range progressCh {
+			s.ui.UpdateProgress(update.Progress, update.Throughput, update.BytesSent, update.BytesTotal)
+		}
+	}()
+
+	go func() {
+		for update := range completionUpdateCh {
+			if update.Error != nil {
+				s.ui.ShowMessage(fmt.Sprintf("Transfer error: %v", update.Error))
+			} else {
+				s.ui.ShowMessage(update.Message)
+			}
+		}
+	}()
+
+	dataChannel, err := s.dataChannelService.CreateFileSenderDataChannel(pc, "fileTransfer")
 	if err != nil {
 		return fmt.Errorf("failed to create file sender data channel: %w", err)
+	}
+
+	err = s.dataChannelService.SetupFileSender(dataChannel, s.fileService, opts.FilePath, progressCh, completionUpdateCh)
+	if err != nil {
+		return fmt.Errorf("failed to setup file sender: %w", err)
 	}
 
 	// Create offer
@@ -102,8 +124,13 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 		return fmt.Errorf("local description is nil after ICE gathering")
 	}
 
-	// Display offer SDP for user to copy
-	err = s.ui.OutputSDP(*finalOffer, "Offer")
+	// Encode and display offer SDP for user to copy
+	encodedOffer, err := s.signalingService.EncodeSessionDescription(*finalOffer)
+	if err != nil {
+		return fmt.Errorf("failed to encode offer SDP: %w", err)
+	}
+
+	err = s.ui.OutputSDP(encodedOffer, "Offer")
 	if err != nil {
 		return fmt.Errorf("failed to output offer SDP: %w", err)
 	}
@@ -114,8 +141,13 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 		return fmt.Errorf("failed to get answer SDP: %w", err)
 	}
 
-	// Set remote description
-	err = s.signalingService.SetRemoteDescription(pc, answer)
+	// Decode and set remote description
+	answerSD, err := s.signalingService.DecodeSessionDescription(answer)
+	if err != nil {
+		return fmt.Errorf("failed to decode answer SDP: %w", err)
+	}
+
+	err = s.signalingService.SetRemoteDescription(pc, answerSD)
 	if err != nil {
 		return fmt.Errorf("failed to set remote description: %w", err)
 	}
@@ -124,7 +156,11 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	s.ui.ShowMessage("Sender is ready. File will start sending when the data channel opens.")
 
 	// Block until context is cancelled
+	defer func() {
+		close(progressCh)
+		close(completionUpdateCh)
+	}()
+
 	<-ctx.Done()
 	return ctx.Err()
 }
-
