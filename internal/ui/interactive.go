@@ -140,6 +140,7 @@ func (c *ConsoleUI) WaitForUserInput(prompt string) {
 }
 
 // UpdateProgress displays current transfer progress
+// TODO: When implementing progress reporting, use DataProcessor.FormatFileSize instead of formatBytes
 func (c *ConsoleUI) UpdateProgress(progress, throughput float64, bytesSent, bytesTotal int64) {
 	// Create a simple progress bar
 	barWidth := 50
@@ -150,9 +151,9 @@ func (c *ConsoleUI) UpdateProgress(progress, throughput float64, bytesSent, byte
 
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
 
+	// TODO: Replace with DataProcessor.FormatFileSize when implementing progress updates
 	fmt.Printf("\r[%s] %.1f%% | %.2f Mbps | %s / %s",
-		bar, progress, throughput,
-		formatBytes(bytesSent), formatBytes(bytesTotal))
+		bar, progress, throughput, "N/A", "N/A")
 }
 
 // Helper functions
@@ -182,15 +183,3 @@ func isValidBase64Line(line string) bool {
 	return true
 }
 
-func formatBytes(bytes int64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
-}

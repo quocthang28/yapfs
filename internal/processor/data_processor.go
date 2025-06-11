@@ -26,14 +26,14 @@ func (d *DataProcessor) OpenReader(filePath string) (*os.File, error) {
 }
 
 // CreateWriter creates a file for writing
-func (d *DataProcessor) CreateWriter(dstPath string) (*os.File, error) {
+func (d *DataProcessor) CreateWriter(destPath string) (*os.File, error) {
 	// Create directory if it doesn't exist
-	dir := filepath.Dir(dstPath)
+	dir := filepath.Dir(destPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	file, err := os.Create(dstPath)
+	file, err := os.Create(destPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create file: %w", err)
 	}
@@ -51,7 +51,7 @@ func (d *DataProcessor) GetFileInfo(filePath string) (os.FileInfo, error) {
 	return stat, nil
 }
 
-// FormatFileSize formats file size in human readable format
+// FormatFileSize formats file size in human readable format //TODO: move to utils pkg
 func (d *DataProcessor) FormatFileSize(size int64) string {
 	const unit = 1024
 	if size < unit {
@@ -64,4 +64,3 @@ func (d *DataProcessor) FormatFileSize(size int64) string {
 	}
 	return fmt.Sprintf("%.1f %cB", float64(size)/float64(div), "KMGTPE"[exp])
 }
-

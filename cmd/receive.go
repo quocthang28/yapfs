@@ -12,7 +12,7 @@ import (
 )
 
 type ReceiveFlags struct {
-	DstPath string
+	DestPath string
 	// Future flags can be easily added here:
 	// Verbose  bool
 	// Timeout  int
@@ -37,7 +37,7 @@ Use --dst to specify where to save the received file.`,
 		return validateReceiveFlags(&receiveFlags)
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		log.Printf("Starting receiver, will save to: %s", receiveFlags.DstPath)
+		log.Printf("Starting receiver, will save to: %s", receiveFlags.DestPath)
 		if err := runReceiverApp(&receiveFlags); err != nil {
 			log.Fatalf("Receiver failed: %v", err)
 		}
@@ -46,29 +46,29 @@ Use --dst to specify where to save the received file.`,
 
 // validateReceiveFlags validates the receive command flags
 func validateReceiveFlags(flags *ReceiveFlags) error {
-	if flags.DstPath == "" {
+	if flags.DestPath == "" {
 		return fmt.Errorf("destination path is required")
 	}
 	// Future validations can be easily added here:
 	// if flags.Timeout <= 0 {
 	//     return fmt.Errorf("timeout must be positive")
 	// }
-	return validateDstPath(flags.DstPath)
+	return validateDestPath(flags.DestPath)
 }
 
-// validateDstPath ensures the destination path is valid for file creation
-func validateDstPath(dstPath string) error {
+// validateDestPath ensures the destination path is valid for file creation
+func validateDestPath(destPath string) error {
 	// Check if path exists and is a directory
-	if info, err := os.Stat(dstPath); err == nil {
+	if info, err := os.Stat(destPath); err == nil {
 		if info.IsDir() {
-			return fmt.Errorf("destination path '%s' is a directory, please specify a file path", dstPath)
+			return fmt.Errorf("destination path '%s' is a directory, please specify a file path", destPath)
 		}
 		// If file exists, it will be overwritten - this is acceptable
 		return nil
 	}
 
 	// If path doesn't exist, check if parent directory exists or can be created
-	dir := filepath.Dir(dstPath)
+	dir := filepath.Dir(destPath)
 	if dir != "." && dir != "/" {
 		if info, err := os.Stat(dir); err != nil {
 			if os.IsNotExist(err) {
@@ -81,9 +81,9 @@ func validateDstPath(dstPath string) error {
 	}
 
 	// Ensure the destination path looks like a file (has a filename)
-	filename := filepath.Base(dstPath)
+	filename := filepath.Base(destPath)
 	if filename == "." || filename == ".." {
-		return fmt.Errorf("destination path '%s' does not specify a filename", dstPath)
+		return fmt.Errorf("destination path '%s' does not specify a filename", destPath)
 	}
 
 	return nil
@@ -93,7 +93,7 @@ func init() {
 	rootCmd.AddCommand(receiveCmd)
 
 	// Define flags with struct binding
-	receiveCmd.Flags().StringVarP(&receiveFlags.DstPath, "dst", "d", "", "Destination path to save received file (required)")
+	receiveCmd.Flags().StringVarP(&receiveFlags.DestPath, "dst", "d", "", "Destination path to save received file (required)")
 
 	// Mark required flags
 	receiveCmd.MarkFlagRequired("dst")
@@ -121,7 +121,7 @@ func runReceiverApp(flags *ReceiveFlags) error {
 
 	// Create receiver options from flags
 	opts := &app.ReceiverOptions{
-		DstPath: flags.DstPath,
+		DestPath: flags.DestPath,
 	}
 
 	receiverApp := app.NewReceiverApp(cfg, peerService, dataChannelService, signalingService, ui, dataProcessor)

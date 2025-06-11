@@ -33,6 +33,6 @@ func (d *DataChannelService) SetupFileSender(dataChannel *webrtc.DataChannel, da
 }
 
 // SetupFileReceiver sets up handlers for receiving files and returns a completion channel
-func (d *DataChannelService) SetupFileReceiver(peerConn *webrtc.PeerConnection, dataProcessor *processor.DataProcessor, dstPath string) (<-chan struct{}, error) {
-	return d.receiver.SetupFileReceiver(peerConn, dataProcessor, dstPath)
+func (d *DataChannelService) SetupFileReceiver(peerConn *webrtc.PeerConnection, dataProcessor *processor.DataProcessor, destPath string) (<-chan struct{}, error) {
+	return d.receiver.SetupFileReceiver(peerConn, dataProcessor, destPath)
 }

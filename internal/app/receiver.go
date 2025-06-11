@@ -11,7 +11,7 @@ import (
 
 // ReceiverOptions configures the receiver application behavior
 type ReceiverOptions struct {
-	DstPath string // Required: destination path to save received file
+	DestPath string // Required: destination path to save received file
 	// Future options can be added here:
 	// Verbose  bool
 	// Timeout  time.Duration
@@ -49,11 +49,11 @@ func NewReceiverApp(
 // Run starts the receiver application with the given options
 func (r *ReceiverApp) Run(opts *ReceiverOptions) error {
 	// Validate required options
-	if opts.DstPath == "" {
+	if opts.DestPath == "" {
 		return fmt.Errorf("destination path is required")
 	}
 
-	r.ui.ShowMessage(fmt.Sprintf("Preparing to receive file to: %s", opts.DstPath))
+	r.ui.ShowMessage(fmt.Sprintf("Preparing to receive file to: %s", opts.DestPath))
 
 	// Create peer connection
 	peerConn, err := r.peerService.CreatePeerConnection()
@@ -70,7 +70,7 @@ func (r *ReceiverApp) Run(opts *ReceiverOptions) error {
 	r.peerService.SetupConnectionStateHandler(peerConn, "receiver")
 
 	// Setup file receiver
-	doneCh, err := r.dataChannelService.SetupFileReceiver(peerConn, r.dataProcessor, opts.DstPath)
+	doneCh, err := r.dataChannelService.SetupFileReceiver(peerConn, r.dataProcessor, opts.DestPath)
 	if err != nil {
 		return fmt.Errorf("failed to setup file receiver data channel handler: %w", err)
 	}

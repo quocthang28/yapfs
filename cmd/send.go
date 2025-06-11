@@ -90,5 +90,5 @@ func runSenderApp(flags *SendFlags) error {
 	}
 
 	senderApp := app.NewSenderApp(cfg, peerService, dataChannelService, signalingService, ui, dataProcessor)
-	return senderApp.Run( opts)
+	return senderApp.Run(opts)
 }

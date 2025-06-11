@@ -23,7 +23,7 @@ func NewReceiverChannel(cfg *config.Config) *ReceiverChannel {
 }
 
 // SetupFileReceiver sets up handlers for receiving files and returns a completion channel
-func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, dataProcessor *processor.DataProcessor, dstPath string) (<-chan struct{}, error) {
+func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, dataProcessor *processor.DataProcessor, destPath string) (<-chan struct{}, error) {
 	doneCh := make(chan struct{})
 
 	// OnDataChannel sets an event handler which is invoked when a data channel message arrives from a remote peer.
@@ -38,13 +38,13 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, dat
 
 			// Create destination file
 			var err error
-			fileWriter, err = dataProcessor.CreateWriter(dstPath)
+			fileWriter, err = dataProcessor.CreateWriter(destPath)
 			if err != nil {
 				log.Printf("Error creating destination file: %v", err)
 				return
 			}
 
-			log.Printf("Ready to receive file to: %s", dstPath)
+			log.Printf("Ready to receive file to: %s", destPath)
 		})
 
 		dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
@@ -66,7 +66,7 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, dat
 				log.Printf("Error writing to file: %v", err)
 				return
 			}
-			
+
 			totalBytesReceived += uint64(n)
 		})
 
