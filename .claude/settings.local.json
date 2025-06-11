@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "*",
+      "Bash(mkdir:*)",
+      "Bash(go build:*)",
+      "Bash(./yapfs --help)",
+      "Bash(./yapfs receive:*)",
+      "Bash(./yapfs send:*)"
+    ],
+    "deny": []
+  }
+}
