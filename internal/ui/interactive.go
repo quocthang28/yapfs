@@ -34,8 +34,7 @@ func (c *ConsoleUI) OutputSDP(sd webrtc.SessionDescription, sdpType string) erro
 
 	fmt.Printf("\n%s SDP (copy this and send to the other peer):\n", sdpType)
 	fmt.Println("========================================")
-	// Break the base64 string into 80-character lines for easier copying
-	c.printWrappedBase64(encoded)
+	fmt.Println(encoded)
 	fmt.Println("========================================")
 	return nil
 }
@@ -77,14 +76,6 @@ func (c *ConsoleUI) InputSDP(sdpType string) (webrtc.SessionDescription, error) 
 	return sd, nil
 }
 
-// printWrappedBase64 prints a base64 string with line breaks for better readability
-func (c *ConsoleUI) printWrappedBase64(encoded string) {
-	const lineLength = 80
-	for i := 0; i < len(encoded); i += lineLength {
-		end := min(i+lineLength, len(encoded))
-		fmt.Println(encoded[i:end])
-	}
-}
 
 // ShowMessage displays a message to the user
 func (c *ConsoleUI) ShowMessage(message string) {
