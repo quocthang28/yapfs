@@ -1,7 +1,6 @@
 package webrtc
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log"
@@ -38,72 +37,6 @@ func NewDataChannelService(cfg *config.Config) *DataChannelService {
 	return &DataChannelService{
 		config: cfg,
 	}
-}
-
-// CreateSenderDataChannel creates a data channel configured for sending with flow control
-func (d *DataChannelService) CreateSenderDataChannel(pc *webrtc.PeerConnection, label string) (*webrtc.DataChannel, error) {
-	ordered := false
-	maxRetransmits := uint16(0)
-
-	options := &webrtc.DataChannelInit{
-		Ordered:        &ordered,
-		MaxRetransmits: &maxRetransmits,
-	}
-
-	dataChannel, err := pc.CreateDataChannel(label, options)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create data channel: %w", err)
-	}
-
-	d.setupSenderFlowControl(dataChannel)
-	return dataChannel, nil
-}
-
-// StartSending begins the data sending process on the given channel
-func (d *DataChannelService) StartSending(ctx context.Context, dc *webrtc.DataChannel) error {
-	// This method can be used to start sending from outside the OnOpen callback
-	// For now, the sending is automatically started in setupSenderFlowControl
-	return nil
-}
-
-// setupSenderFlowControl configures flow control for a sending data channel
-func (d *DataChannelService) setupSenderFlowControl(dataChannel *webrtc.DataChannel) {
-	buf := make([]byte, d.config.WebRTC.PacketSize)
-	sendMoreCh := make(chan struct{}, 1)
-
-	// Register channel opening handling
-	dataChannel.OnOpen(func() {
-		log.Printf(
-			"OnOpen: %s-%d. Start sending a series of %d-byte packets as fast as it can\n",
-			dataChannel.Label(), dataChannel.ID(), d.config.WebRTC.PacketSize,
-		)
-
-		for {
-			err := dataChannel.Send(buf)
-			if err != nil {
-				log.Printf("Error sending data: %v", err)
-				return
-			}
-
-			if dataChannel.BufferedAmount() > d.config.WebRTC.MaxBufferedAmount {
-				// Wait until the bufferedAmount becomes lower than the threshold
-				<-sendMoreCh
-			}
-		}
-	})
-
-	// Set bufferedAmountLowThreshold so that we can get notified when we can send more
-	dataChannel.SetBufferedAmountLowThreshold(d.config.WebRTC.BufferedAmountLowThreshold)
-
-	// This callback is made when the current bufferedAmount becomes lower than the threshold
-	dataChannel.OnBufferedAmountLow(func() {
-		// Make sure to not block this channel or perform long running operations in this callback
-		// This callback is executed by pion/sctp. If this callback is blocking it will stop operations
-		select {
-		case sendMoreCh <- struct{}{}:
-		default:
-		}
-	})
 }
 
 // CreateFileSenderDataChannel creates a data channel configured for sending files
@@ -270,7 +203,7 @@ func (d *DataChannelService) SetupFileReceiver(pc *webrtc.PeerConnection, fileSe
 						if progressCh != nil {
 							select {
 							case progressCh <- ProgressUpdate{
-								Progress:   0, // We don't know total size ahead of time for receiver
+								Progress:   0, // We don't know total size ahead of time for receiver, TODO: send file metadata first before the actual file
 								Throughput: mbps,
 								BytesSent:  int64(received), // Using BytesSent for consistency, but it's actually received
 								BytesTotal: 0,               // Unknown until transfer completes

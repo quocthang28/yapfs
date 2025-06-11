@@ -332,6 +332,458 @@ func (c *CloudflareSignaling) GetAnswer(id string) (*webrtc.SessionDescription, 
 3. **Phase 3**: Enhanced security and rate limiting
 4. **Phase 4**: Optional: Web UI for even simpler session sharing
 
+## 5. WebRTC Connection Reliability
+
+### Current Limitations
+- No retry mechanism for failed ICE gathering
+- Single attempt SDP exchange with no fallback
+- Connection failures result in immediate termination
+- No handling of network connectivity issues during handshake
+
+### Proposed Improvements
+
+#### ICE Exchange Retry Logic
+- **Automatic retry**: Retry failed ICE gathering with exponential backoff
+- **Connection state monitoring**: Monitor ICE connection state changes
+- **Fallback mechanisms**: Try different ICE server configurations on failure
+- **Timeout handling**: Configurable timeouts for each phase of connection establishment
+
+#### Implementation Design
+```go
+type ConnectionRetryConfig struct {
+    MaxRetries        int           // Maximum number of retry attempts
+    InitialDelay      time.Duration // Initial retry delay
+    MaxDelay          time.Duration // Maximum retry delay
+    BackoffMultiplier float64       // Exponential backoff multiplier
+    ICETimeout        time.Duration // Timeout for ICE gathering
+}
+
+type RetryableSignaling struct {
+    config     ConnectionRetryConfig
+    iceServers []webrtc.ICEServer // Alternative ICE server configurations
+}
+
+func (r *RetryableSignaling) CreateOfferWithRetry(ctx context.Context, pc *webrtc.PeerConnection) (*webrtc.SessionDescription, error) {
+    var lastErr error
+    delay := r.config.InitialDelay
+    
+    for attempt := 0; attempt <= r.config.MaxRetries; attempt++ {
+        if attempt > 0 {
+            select {
+            case <-time.After(delay):
+            case <-ctx.Done():
+                return nil, ctx.Err()
+            }
+            
+            // Increase delay for next attempt
+            delay = time.Duration(float64(delay) * r.config.BackoffMultiplier)
+            if delay > r.config.MaxDelay {
+                delay = r.config.MaxDelay
+            }
+        }
+        
+        // Attempt ICE gathering with timeout
+        gatherCtx, cancel := context.WithTimeout(ctx, r.config.ICETimeout)
+        offer, err := r.attemptOfferCreation(gatherCtx, pc)
+        cancel()
+        
+        if err == nil {
+            return offer, nil
+        }
+        
+        lastErr = err
+        
+        // Try different ICE servers on subsequent attempts
+        if attempt < len(r.iceServers) {
+            pc.Close()
+            pc = r.createPeerConnectionWithICEServers(r.iceServers[attempt])
+        }
+    }
+    
+    return nil, fmt.Errorf("failed to create offer after %d attempts: %w", r.config.MaxRetries+1, lastErr)
+}
+
+func (r *RetryableSignaling) attemptOfferCreation(ctx context.Context, pc *webrtc.PeerConnection) (*webrtc.SessionDescription, error) {
+    offer, err := pc.CreateOffer(nil)
+    if err != nil {
+        return nil, fmt.Errorf("create offer failed: %w", err)
+    }
+    
+    if err := pc.SetLocalDescription(offer); err != nil {
+        return nil, fmt.Errorf("set local description failed: %w", err)
+    }
+    
+    // Wait for ICE gathering with context cancellation
+    gatherComplete := webrtc.GatheringCompletePromise(pc)
+    select {
+    case <-gatherComplete:
+        return pc.LocalDescription(), nil
+    case <-ctx.Done():
+        return nil, fmt.Errorf("ICE gathering timeout: %w", ctx.Err())
+    }
+}
+```
+
+#### Connection State Recovery
+```go
+type ConnectionMonitor struct {
+    pc              *webrtc.PeerConnection
+    retryConfig     ConnectionRetryConfig
+    onFailure       func() error // Callback to recreate connection
+    onSuccess       func()       // Callback when connection recovers
+}
+
+func (c *ConnectionMonitor) MonitorConnection(ctx context.Context) {
+    c.pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+        switch state {
+        case webrtc.PeerConnectionStateFailed:
+            go c.handleConnectionFailure(ctx)
+        case webrtc.PeerConnectionStateConnected:
+            if c.onSuccess != nil {
+                c.onSuccess()
+            }
+        case webrtc.PeerConnectionStateDisconnected:
+            // Start monitoring for recovery or failure
+            go c.monitorReconnection(ctx)
+        }
+    })
+}
+
+func (c *ConnectionMonitor) handleConnectionFailure(ctx context.Context) {
+    if c.onFailure != nil {
+        if err := c.onFailure(); err != nil {
+            // Log failure and potentially terminate
+        }
+    }
+}
+```
+
+#### Enhanced Error Handling
+- **Specific error types**: Differentiate between network, configuration, and protocol errors
+- **User-friendly messages**: Clear error messages with suggested actions
+- **Diagnostic information**: Include connection state and timing information in errors
+- **Recovery suggestions**: Provide specific steps users can take to resolve issues
+
+#### Configuration Integration
+```go
+type WebRTCConfig struct {
+    // Existing configuration...
+    
+    // Connection retry configuration
+    ConnectionRetry ConnectionRetryConfig `mapstructure:"connection_retry"`
+    
+    // Alternative ICE servers for failover
+    FallbackICEServers [][]webrtc.ICEServer `mapstructure:"fallback_ice_servers"`
+}
+```
+
+#### Benefits
+- **Improved reliability**: Better success rate for WebRTC connections
+- **Network resilience**: Handle temporary network issues during connection setup
+- **Better diagnostics**: Clear feedback when connections fail permanently
+- **Configurable behavior**: Users can adjust retry behavior based on their network conditions
+- **Graceful degradation**: Fallback to different ICE server configurations
+
+## 6. Multiple Data Channels for Concurrent File Transfer
+
+### Current Limitations
+- Single data channel per WebRTC connection limits transfer throughput
+- Files are transferred sequentially in fixed 1KB chunks
+- No parallelization of file transfer operations
+- Cannot fully utilize available bandwidth for large files
+
+### Proposed Enhancement: Concurrent Data Channels
+
+#### Architecture Overview
+```
+File Splitting:    [Large File] → [Chunk 1] [Chunk 2] [Chunk 3] [Chunk N]
+                        ↓           ↓         ↓         ↓         ↓
+Data Channels:    [Channel 1] [Channel 2] [Channel 3] [Channel N]
+                        ↓           ↓         ↓         ↓         ↓
+Reassembly:       [Chunk 1] [Chunk 2] [Chunk 3] [Chunk N] → [Complete File]
+```
+
+#### File Chunking Strategy
+```go
+type FileChunk struct {
+    Index      int    // Chunk sequence number
+    Data       []byte // Chunk data
+    Size       int64  // Size of this chunk
+    IsLast     bool   // Indicates final chunk
+    TotalSize  int64  // Total file size
+    Checksum   uint32 // CRC32 for integrity
+}
+
+type ChunkingConfig struct {
+    ChunkSize     int64 // Size per chunk (e.g., 1MB)
+    MaxChannels   int   // Maximum concurrent channels (e.g., 4)
+    BufferSize    int   // Buffer size per channel
+}
+
+func SplitFileIntoChunks(filePath string, config ChunkingConfig) ([]FileChunk, error) {
+    file, err := os.Open(filePath)
+    if err != nil {
+        return nil, err
+    }
+    defer file.Close()
+    
+    stat, err := file.Stat()
+    if err != nil {
+        return nil, err
+    }
+    
+    totalSize := stat.Size()
+    numChunks := int(math.Ceil(float64(totalSize) / float64(config.ChunkSize)))
+    chunks := make([]FileChunk, 0, numChunks)
+    
+    for i := 0; i < numChunks; i++ {
+        chunkData := make([]byte, config.ChunkSize)
+        n, err := file.Read(chunkData)
+        if err != nil && err != io.EOF {
+            return nil, err
+        }
+        
+        chunk := FileChunk{
+            Index:     i,
+            Data:      chunkData[:n],
+            Size:      int64(n),
+            IsLast:    i == numChunks-1,
+            TotalSize: totalSize,
+            Checksum:  crc32.ChecksumIEEE(chunkData[:n]),
+        }
+        
+        chunks = append(chunks, chunk)
+    }
+    
+    return chunks, nil
+}
+```
+
+#### Multi-Channel Data Transfer
+```go
+type MultiChannelTransfer struct {
+    peerConn    *webrtc.PeerConnection
+    channels    []*webrtc.DataChannel
+    config      ChunkingConfig
+    chunks      []FileChunk
+    progressCh  chan TransferProgress
+    errorCh     chan error
+    completeCh  chan bool
+}
+
+type TransferProgress struct {
+    ChannelID       int
+    ChunkIndex      int
+    BytesTransferred int64
+    TotalBytes      int64
+    Throughput      float64
+}
+
+func (m *MultiChannelTransfer) StartConcurrentTransfer(ctx context.Context) error {
+    // Create multiple data channels
+    for i := 0; i < m.config.MaxChannels; i++ {
+        channelLabel := fmt.Sprintf("fileTransfer_%d", i)
+        channel, err := m.peerConn.CreateDataChannel(channelLabel, nil)
+        if err != nil {
+            return fmt.Errorf("failed to create data channel %d: %w", i, err)
+        }
+        
+        m.channels = append(m.channels, channel)
+        
+        // Set up channel event handlers
+        m.setupChannelHandlers(i, channel)
+    }
+    
+    // Distribute chunks across channels
+    return m.distributeChunksToChannels(ctx)
+}
+
+func (m *MultiChannelTransfer) distributeChunksToChannels(ctx context.Context) error {
+    // Round-robin distribution of chunks to channels
+    chunkQueues := make([][]FileChunk, m.config.MaxChannels)
+    
+    for i, chunk := range m.chunks {
+        channelIndex := i % m.config.MaxChannels
+        chunkQueues[channelIndex] = append(chunkQueues[channelIndex], chunk)
+    }
+    
+    // Start concurrent transfers on each channel
+    var wg sync.WaitGroup
+    for i, queue := range chunkQueues {
+        wg.Add(1)
+        go func(channelID int, chunks []FileChunk) {
+            defer wg.Done()
+            m.transferChunksOnChannel(ctx, channelID, chunks)
+        }(i, queue)
+    }
+    
+    // Wait for all transfers to complete
+    go func() {
+        wg.Wait()
+        m.completeCh <- true
+    }()
+    
+    return nil
+}
+
+func (m *MultiChannelTransfer) transferChunksOnChannel(ctx context.Context, channelID int, chunks []FileChunk) {
+    channel := m.channels[channelID]
+    
+    for _, chunk := range chunks {
+        select {
+        case <-ctx.Done():
+            return
+        default:
+            // Serialize chunk data
+            data, err := json.Marshal(chunk)
+            if err != nil {
+                m.errorCh <- fmt.Errorf("channel %d: failed to marshal chunk %d: %w", channelID, chunk.Index, err)
+                return
+            }
+            
+            // Send chunk with flow control
+            err = m.sendWithFlowControl(channel, data)
+            if err != nil {
+                m.errorCh <- fmt.Errorf("channel %d: failed to send chunk %d: %w", channelID, chunk.Index, err)
+                return
+            }
+            
+            // Report progress
+            m.progressCh <- TransferProgress{
+                ChannelID:        channelID,
+                ChunkIndex:       chunk.Index,
+                BytesTransferred: chunk.Size,
+                TotalBytes:       chunk.TotalSize,
+            }
+        }
+    }
+}
+```
+
+#### Receiver-Side Reassembly
+```go
+type ChunkReceiver struct {
+    expectedChunks  int
+    receivedChunks  map[int]FileChunk // chunk index -> chunk data
+    totalSize       int64
+    outputFile      *os.File
+    progressCh      chan TransferProgress
+    mutex           sync.Mutex
+}
+
+func (r *ChunkReceiver) HandleIncomingChunk(channelID int, data []byte) error {
+    var chunk FileChunk
+    if err := json.Unmarshal(data, &chunk); err != nil {
+        return fmt.Errorf("failed to unmarshal chunk: %w", err)
+    }
+    
+    // Verify chunk integrity
+    if crc32.ChecksumIEEE(chunk.Data) != chunk.Checksum {
+        return fmt.Errorf("chunk %d integrity check failed", chunk.Index)
+    }
+    
+    r.mutex.Lock()
+    defer r.mutex.Unlock()
+    
+    // Store received chunk
+    r.receivedChunks[chunk.Index] = chunk
+    
+    // Check if we have all chunks
+    if len(r.receivedChunks) == r.expectedChunks {
+        return r.reassembleFile()
+    }
+    
+    // Report progress
+    r.progressCh <- TransferProgress{
+        ChannelID:        channelID,
+        ChunkIndex:       chunk.Index,
+        BytesTransferred: chunk.Size,
+        TotalBytes:       chunk.TotalSize,
+    }
+    
+    return nil
+}
+
+func (r *ChunkReceiver) reassembleFile() error {
+    // Sort chunks by index
+    indices := make([]int, 0, len(r.receivedChunks))
+    for index := range r.receivedChunks {
+        indices = append(indices, index)
+    }
+    sort.Ints(indices)
+    
+    // Write chunks to file in order
+    for _, index := range indices {
+        chunk := r.receivedChunks[index]
+        if _, err := r.outputFile.Write(chunk.Data); err != nil {
+            return fmt.Errorf("failed to write chunk %d: %w", index, err)
+        }
+    }
+    
+    return r.outputFile.Sync()
+}
+```
+
+#### Configuration Integration
+```go
+type MultiChannelConfig struct {
+    Enabled       bool  `mapstructure:"enabled"`        // Enable multi-channel transfer
+    MaxChannels   int   `mapstructure:"max_channels"`   // Maximum concurrent channels (default: 4)
+    ChunkSize     int64 `mapstructure:"chunk_size"`     // Size per chunk in bytes (default: 1MB)
+    MinFileSize   int64 `mapstructure:"min_file_size"`  // Minimum file size to use multi-channel (default: 10MB)
+}
+
+// Add to WebRTCConfig
+type WebRTCConfig struct {
+    // Existing fields...
+    MultiChannel MultiChannelConfig `mapstructure:"multi_channel"`
+}
+```
+
+#### Usage Example
+```bash
+# Enable multi-channel transfer with 6 channels for large files
+./yapfs send --file large_video.mp4 --multi-channel --max-channels 6
+
+# Receiver automatically detects multi-channel transfer
+./yapfs receive --dst ./downloads/
+```
+
+#### Progressive Enhancement
+```go
+func (s *SenderApp) shouldUseMultiChannel(fileSize int64) bool {
+    return s.config.MultiChannel.Enabled && 
+           fileSize >= s.config.MultiChannel.MinFileSize
+}
+
+func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
+    fileInfo, err := s.fileService.GetFileInfo(opts.FilePath)
+    if err != nil {
+        return err
+    }
+    
+    if s.shouldUseMultiChannel(fileInfo.Size) {
+        return s.runMultiChannelTransfer(ctx, opts, fileInfo)
+    } else {
+        return s.runSingleChannelTransfer(ctx, opts, fileInfo)
+    }
+}
+```
+
+#### Benefits
+- **Increased throughput**: Parallel data channels can better utilize available bandwidth
+- **Improved performance**: Especially beneficial for large files (>10MB)
+- **Fault tolerance**: Single channel failure doesn't stop entire transfer
+- **Scalable**: Number of channels can be configured based on network conditions
+- **Backward compatibility**: Falls back to single channel for small files or when disabled
+
+#### Implementation Considerations
+- **Memory usage**: Need to balance chunk size vs. memory consumption
+- **Network overhead**: More channels = more WebRTC overhead
+- **Reassembly complexity**: Proper ordering and integrity verification required
+- **Configuration tuning**: Optimal channel count depends on network conditions
+- **Error handling**: Need to handle partial failures gracefully
+
 ## Implementation Roadmap
 
 ### Short Term (Next Release)
@@ -339,17 +791,21 @@ func (c *CloudflareSignaling) GetAnswer(id string) (*webrtc.SessionDescription, 
 - [ ] Basic path security and validation
 - [ ] Cloudflare Worker SDP exchange
 - [ ] Enhanced UI with progress bar and transfer statistics
+- [ ] WebRTC connection retry and reliability improvements
 
 ### Medium Term
+- [ ] Multiple data channels for concurrent file transfer
 - [ ] Resume capability for interrupted transfers
 - [ ] Peer authentication mechanisms
 - [ ] Enhanced security hardening
 - [ ] Advanced progress features (terminal width detection, color support)
+- [ ] ICE server failover and connection monitoring
 
 ### Long Term
 - [ ] Application-layer encryption
 - [ ] Advanced security features (rate limiting, quotas)
 - [ ] Rich terminal UI with multiple progress bars for concurrent transfers
+- [ ] Advanced connection diagnostics and network analysis
 
 ## Contributing
 
