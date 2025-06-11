@@ -18,11 +18,11 @@ type Config struct {
 
 // WebRTCConfig holds WebRTC-specific configuration
 type WebRTCConfig struct {
-	ICEServers              []webrtc.ICEServer `yaml:"ice_servers"`
-	BufferedAmountLowThreshold uint64           `yaml:"buffered_amount_low_threshold"`
-	MaxBufferedAmount       uint64             `yaml:"max_buffered_amount"`
-	PacketSize              int                `yaml:"packet_size"`
-	ThroughputReportInterval int               `yaml:"throughput_report_interval_ms"`
+	ICEServers                 []webrtc.ICEServer `yaml:"ice_servers"`
+	BufferedAmountLowThreshold uint64             `yaml:"buffered_amount_low_threshold"`
+	MaxBufferedAmount          uint64             `yaml:"max_buffered_amount"`
+	PacketSize                 int                `yaml:"packet_size"`
+	ThroughputReportInterval   int                `yaml:"throughput_report_interval_ms"`
 }
 
 // NewDefaultConfig returns a configuration with sensible defaults

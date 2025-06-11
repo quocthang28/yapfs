@@ -6,13 +6,13 @@ import "fmt"
 type ProgressReporter interface {
 	// UpdateProgress reports current transfer progress
 	UpdateProgress(progress, throughput float64, bytesSent, bytesTotal int64)
-	
+
 	// UpdateThroughput reports just throughput (for backward compatibility)
 	UpdateThroughput(mbps float64)
-	
+
 	// ReportError reports an error during transfer
 	ReportError(err error)
-	
+
 	// ReportCompletion reports successful completion
 	ReportCompletion(message string)
 }

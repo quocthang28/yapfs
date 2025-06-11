@@ -66,7 +66,7 @@ func validateDstPath(dstPath string) error {
 		// If file exists, it will be overwritten - this is acceptable
 		return nil
 	}
-	
+
 	// If path doesn't exist, check if parent directory exists or can be created
 	dir := filepath.Dir(dstPath)
 	if dir != "." && dir != "/" {
@@ -79,28 +79,28 @@ func validateDstPath(dstPath string) error {
 			return fmt.Errorf("parent path '%s' is not a directory", dir)
 		}
 	}
-	
+
 	// Ensure the destination path looks like a file (has a filename)
 	filename := filepath.Base(dstPath)
 	if filename == "." || filename == ".." {
 		return fmt.Errorf("destination path '%s' does not specify a filename", dstPath)
 	}
-	
+
 	return nil
 }
 
 func init() {
 	rootCmd.AddCommand(receiveCmd)
-	
+
 	// Define flags with struct binding
 	receiveCmd.Flags().StringVarP(&receiveFlags.DstPath, "dst", "d", "", "Destination path to save received file (required)")
-	
+
 	// Mark required flags
 	receiveCmd.MarkFlagRequired("dst")
-	
+
 	// Bind flags to viper for environment variable support
 	viper.BindPFlag("receive.dst", receiveCmd.Flags().Lookup("dst"))
-	
+
 	// Future flag bindings can be easily added here:
 	// viper.BindPFlag("receive.verbose", receiveCmd.Flags().Lookup("verbose"))
 	// viper.BindPFlag("receive.timeout", receiveCmd.Flags().Lookup("timeout"))

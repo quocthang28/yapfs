@@ -20,7 +20,7 @@ func NewConsoleUI() *ConsoleUI {
 // ShowInstructions displays initial instructions for the given role
 func (c *ConsoleUI) ShowInstructions(role string) {
 	fmt.Printf("\n=== YAPFS - P2P File Sharing ===\n\n")
-	
+
 	if role == "sender" {
 		fmt.Printf("This instance will create an SDP offer and send the file.\n\n")
 		fmt.Printf("Instructions:\n")
@@ -36,7 +36,7 @@ func (c *ConsoleUI) ShowInstructions(role string) {
 		fmt.Printf("3. Share the answer SDP back to sender (via file or copy/paste)\n")
 		fmt.Printf("4. File will be saved to destination\n\n")
 	}
-	
+
 	fmt.Printf("Press Enter to continue...")
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Scan()
@@ -55,46 +55,46 @@ func (c *ConsoleUI) OutputSDP(encoded string, sdpType string) error {
 	fmt.Printf("\n=== %s SDP Generated ===\n\n", sdpType)
 	fmt.Printf("✓ %s SDP saved to: %s\n", sdpType, filename)
 	fmt.Printf("✓ %s SDP size: %d characters\n\n", sdpType, len(encoded))
-	
+
 	fmt.Printf("Share this SDP with the other peer:\n\n")
-	
+
 	// Show truncated SDP for reference
 	displaySDP := encoded
 	if len(displaySDP) > 200 {
 		displaySDP = displaySDP[:200] + "..."
 	}
 	fmt.Printf("%s\n\n", displaySDP)
-	
+
 	fmt.Printf("Press Enter to continue to next step...")
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Scan()
-	
+
 	return nil
 }
 
 // InputSDP prompts user to input SDP and returns the raw SDP string
 func (c *ConsoleUI) InputSDP(sdpType string) (string, error) {
 	fmt.Printf("\n=== Enter %s SDP ===\n\n", sdpType)
-	
+
 	filename := fmt.Sprintf("%s_sdp.txt", strings.ToLower(sdpType))
-	
+
 	fmt.Printf("Options to provide SDP:\n\n")
 	fmt.Printf("1. 📁 File input (recommended): ")
-	
+
 	// Check if file exists
 	if _, err := os.Stat(filename); err == nil {
 		fmt.Printf("✅ File detected\n")
 	} else {
 		fmt.Printf("❌ File not found\n")
 	}
-	
+
 	fmt.Printf("   Place SDP content in '%s'\n\n", filename)
 	fmt.Printf("2. Manual input: Type SDP content and press Enter\n\n")
-	
+
 	fmt.Printf("Press Enter to process SDP...")
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Scan()
-	
+
 	// Try file input first
 	if content, err := os.ReadFile(filename); err == nil {
 		cleaned := cleanSDPContent(string(content))
@@ -103,23 +103,23 @@ func (c *ConsoleUI) InputSDP(sdpType string) (string, error) {
 			return cleaned, nil
 		}
 	}
-	
+
 	// Fall back to manual input
 	fmt.Printf("\nNo valid SDP found in file. Please enter SDP manually:\n")
 	fmt.Printf("(Paste SDP content and press Enter)\n> ")
-	
+
 	scanner.Scan()
 	input := scanner.Text()
-	
+
 	if input == "" {
 		return "", fmt.Errorf("no SDP provided")
 	}
-	
+
 	cleaned := cleanSDPContent(input)
 	if len(cleaned) == 0 {
 		return "", fmt.Errorf("invalid SDP format")
 	}
-	
+
 	fmt.Printf("✓ Successfully parsed SDP\n")
 	return cleaned, nil
 }
@@ -147,11 +147,11 @@ func (c *ConsoleUI) UpdateProgress(progress, throughput float64, bytesSent, byte
 	if filled > barWidth {
 		filled = barWidth
 	}
-	
+
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
-	
-	fmt.Printf("\r[%s] %.1f%% | %.2f Mbps | %s / %s", 
-		bar, progress, throughput, 
+
+	fmt.Printf("\r[%s] %.1f%% | %.2f Mbps | %s / %s",
+		bar, progress, throughput,
 		formatBytes(bytesSent), formatBytes(bytesTotal))
 }
 
@@ -172,10 +172,10 @@ func isValidBase64Line(line string) bool {
 		return false
 	}
 	for _, char := range line {
-		if !((char >= 'A' && char <= 'Z') || 
-			 (char >= 'a' && char <= 'z') || 
-			 (char >= '0' && char <= '9') || 
-			 char == '+' || char == '/' || char == '=') {
+		if !((char >= 'A' && char <= 'Z') ||
+			(char >= 'a' && char <= 'z') ||
+			(char >= '0' && char <= '9') ||
+			char == '+' || char == '/' || char == '=') {
 			return false
 		}
 	}

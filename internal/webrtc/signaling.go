@@ -78,16 +78,16 @@ func (s *SignalingService) EncodeSessionDescription(sd webrtc.SessionDescription
 // DecodeSessionDescription decodes a base64 encoded session description
 func (s *SignalingService) DecodeSessionDescription(encoded string) (webrtc.SessionDescription, error) {
 	var sd webrtc.SessionDescription
-	
+
 	bytes, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return sd, fmt.Errorf("failed to decode base64: %w", err)
 	}
-	
+
 	err = json.Unmarshal(bytes, &sd)
 	if err != nil {
 		return sd, fmt.Errorf("failed to unmarshal session description: %w", err)
 	}
-	
+
 	return sd, nil
 }

@@ -44,16 +44,16 @@ Use --file to specify the path to the file you want to send.`,
 
 func init() {
 	rootCmd.AddCommand(sendCmd)
-	
+
 	// Define flags with struct binding
 	sendCmd.Flags().StringVarP(&sendFlags.FilePath, "file", "f", "", "Path to file to send (required)")
-	
+
 	// Mark required flags
 	sendCmd.MarkFlagRequired("file")
-	
+
 	// Bind flags to viper for environment variable support
 	viper.BindPFlag("send.file", sendCmd.Flags().Lookup("file"))
-	
+
 	// Future flag bindings can be easily added here:
 	// viper.BindPFlag("send.verbose", sendCmd.Flags().Lookup("verbose"))
 	// viper.BindPFlag("send.timeout", sendCmd.Flags().Lookup("timeout"))

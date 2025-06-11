@@ -18,7 +18,7 @@ import (
 )
 
 var (
-	cfg *config.Config
+	cfg     *config.Config
 	cfgFile string
 )
 
@@ -40,7 +40,7 @@ Both peers will exchange SDP offers/answers manually to establish the connection
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		// Initialize viper configuration
 		initConfig()
-		
+
 		// Initialize configuration
 		cfg = config.NewDefaultConfig()
 		if err := cfg.Validate(); err != nil {
@@ -52,7 +52,7 @@ Both peers will exchange SDP offers/answers manually to establish the connection
 func init() {
 	// Add global flags
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.yapfs.yaml)")
-	
+
 	// Set up viper environment variable support
 	viper.SetEnvPrefix("YAPFS")
 	viper.AutomaticEnv()
@@ -70,16 +70,16 @@ func initConfig() {
 			log.Printf("Warning: Could not find home directory: %v", err)
 			return
 		}
-		
+
 		// Search config in home directory with name ".yapfs" (without extension)
 		viper.AddConfigPath(home)
 		viper.SetConfigType("yaml")
 		viper.SetConfigName(".yapfs")
 	}
-	
+
 	// Read in environment variables that match
 	viper.AutomaticEnv()
-	
+
 	// If a config file is found, read it in
 	if err := viper.ReadInConfig(); err == nil {
 		log.Printf("Using config file: %s", viper.ConfigFileUsed())
@@ -120,7 +120,7 @@ func createServices() (*webrtc.PeerService, *webrtc.DataChannelService, *webrtc.
 	signalingService := webrtc.NewSignalingService()
 	peerService := webrtc.NewPeerService(cfg, stateHandler)
 	consoleUI := ui.NewConsoleUI()
-	
+
 	dataChannelService := webrtc.NewDataChannelService(cfg)
 	fileService := file.NewFileService()
 

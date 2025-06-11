@@ -11,14 +11,14 @@ import (
 
 // PeerService manages WebRTC peer connection lifecycle
 type PeerService struct {
-	config *config.Config
+	config       *config.Config
 	stateHandler *DefaultConnectionStateHandler
 }
 
 // NewPeerService creates a new peer service with the given configuration
 func NewPeerService(cfg *config.Config, stateHandler *DefaultConnectionStateHandler) *PeerService {
 	return &PeerService{
-		config: cfg,
+		config:       cfg,
 		stateHandler: stateHandler,
 	}
 }
@@ -28,12 +28,12 @@ func (p *PeerService) CreatePeerConnection(ctx context.Context) (*webrtc.PeerCon
 	webrtcConfig := webrtc.Configuration{
 		ICEServers: p.config.WebRTC.ICEServers,
 	}
-	
+
 	pc, err := webrtc.NewPeerConnection(webrtcConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create peer connection: %w", err)
 	}
-	
+
 	return pc, nil
 }
 
