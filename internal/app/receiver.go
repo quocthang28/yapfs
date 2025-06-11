@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	"yapfs/internal/config"
-	"yapfs/internal/file"
+	"yapfs/internal/processor"
 	"yapfs/internal/ui"
-	"yapfs/internal/webrtc"
+	"yapfs/internal/transport"
 )
 
 // ReceiverOptions configures the receiver application behavior
@@ -21,21 +21,21 @@ type ReceiverOptions struct {
 // ReceiverApp implements receiver application logic
 type ReceiverApp struct {
 	config             *config.Config
-	peerService        *webrtc.PeerService
-	dataChannelService *webrtc.DataChannelService
-	signalingService   *webrtc.SignalingService
+	peerService        *transport.PeerService
+	dataChannelService *transport.DataChannelService
+	signalingService   *transport.SignalingService
 	ui                 *ui.ConsoleUI
-	fileService        *file.FileService
+	dataProcessor      *processor.DataProcessor
 }
 
 // NewReceiverApp creates a new receiver application
 func NewReceiverApp(
 	cfg *config.Config,
-	peerService *webrtc.PeerService,
-	dataChannelService *webrtc.DataChannelService,
-	signalingService *webrtc.SignalingService,
+	peerService *transport.PeerService,
+	dataChannelService *transport.DataChannelService,
+	signalingService *transport.SignalingService,
 	ui *ui.ConsoleUI,
-	fileService *file.FileService,
+	dataProcessor *processor.DataProcessor,
 ) *ReceiverApp {
 	return &ReceiverApp{
 		config:             cfg,
@@ -43,7 +43,7 @@ func NewReceiverApp(
 		dataChannelService: dataChannelService,
 		signalingService:   signalingService,
 		ui:                 ui,
-		fileService:        fileService,
+		dataProcessor:      dataProcessor,
 	}
 }
 
@@ -70,29 +70,8 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	// Setup connection state handler
 	r.peerService.SetupConnectionStateHandler(pc, "receiver")
 
-	// Setup file receiver with progress and completion tracking channels
-	progressCh := make(chan webrtc.ProgressUpdate, 1)
-	completionUpdateCh := make(chan webrtc.CompletionUpdate, 1)
-
-	// Handle progress updates
-	go func() {
-		for update := range progressCh {
-			r.ui.UpdateProgress(update.Progress, update.Throughput, update.BytesSent, update.BytesTotal)
-		}
-	}()
-
-	// Handle completion updates
-	go func() {
-		for update := range completionUpdateCh {
-			if update.Error != nil {
-				r.ui.ShowMessage(fmt.Sprintf("Transfer error: %v", update.Error))
-			} else {
-				r.ui.ShowMessage(update.Message)
-			}
-		}
-	}()
-
-	completionCh, err := r.dataChannelService.SetupFileReceiver(pc, r.fileService, opts.DstPath, progressCh, completionUpdateCh)
+	// Setup file receiver
+	completionCh, err := r.dataChannelService.SetupFileReceiver(pc, r.dataProcessor, opts.DstPath)
 	if err != nil {
 		return fmt.Errorf("failed to setup file receiver data channel handler: %w", err)
 	}
@@ -147,11 +126,6 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	r.ui.ShowMessage("Receiver is ready. Waiting for file transfer...")
 
 	// Wait for either transfer completion or context cancellation
-	defer func() {
-		close(progressCh)
-		close(completionUpdateCh)
-	}()
-
 	select {
 	case <-completionCh:
 		r.ui.ShowMessage("File transfer completed successfully")

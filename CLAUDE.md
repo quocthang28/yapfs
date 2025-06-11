@@ -25,10 +25,13 @@ yapfs/
 │   │   └── config.go       # Configuration management
 │   ├── file/               # File handling service layer
 │   │   └── file.go         # File operations, readers, writers
-│   ├── webrtc/             # WebRTC service layer
+│   ├── transport/          # Transport service layer (WebRTC)
 │   │   ├── peer.go         # Peer connection service
-│   │   ├── data_channel.go # Data channel + flow control
-│   │   └── signaling.go    # SDP exchange service
+│   │   ├── data_channel.go # Data channel facade
+│   │   ├── signaling.go    # SDP exchange service
+│   │   └── datachannel/    # Data channel implementations
+│   │       ├── sender.go   # File sending logic
+│   │       └── receiver.go # File receiving logic
 │   └── ui/                 # User interface layer
 │       ├── interactive.go  # Console-based UI implementation
 │       └── progress.go     # Progress reporting and display
@@ -37,22 +40,35 @@ yapfs/
 
 ### Core Services
 
-#### **PeerService** (`internal/webrtc/peer.go`)
+#### **PeerService** (`internal/transport/peer.go`)
 Manages WebRTC peer connection lifecycle:
 - Creates peer connections with ICE server configuration
 - Sets up connection state change handlers
 - Handles connection lifecycle (create, monitor, close)
 - Provides default state handling for failed/closed connections
 
-#### **DataChannelService** (`internal/webrtc/data_channel.go`)
-Handles data channels, flow control, and file transfer logic:
+#### **DataChannelService** (`internal/transport/data_channel.go`)
+Facade service that composes sender and receiver services:
+- Delegates sender operations to `datachannel.SenderService`
+- Delegates receiver operations to `datachannel.ReceiverService`
+- Maintains backward compatibility with existing API
+- Provides unified interface for data channel operations
+
+#### **SenderService** (`internal/transport/datachannel/sender.go`)
+Handles file sending logic:
 - Creates sender data channels with flow control
-- Sets up receiver data channel handlers
-- Implements file transfer with progress monitoring
-- Manages buffering and throughput reporting
+- Implements chunked file reading and transmission
+- Manages flow control and buffering
 - Handles EOF signaling for transfer completion
 
-#### **SignalingService** (`internal/webrtc/signaling.go`)
+#### **ReceiverService** (`internal/transport/datachannel/receiver.go`)
+Handles file receiving logic:
+- Sets up receiver data channel handlers
+- Manages file writing and progress tracking
+- Handles incoming data channel messages
+- Processes EOF signals for completion
+
+#### **SignalingService** (`internal/transport/signaling.go`)
 Manages SDP offer/answer exchange and encoding/decoding:
 - Creates and sets SDP offers and answers
 - Handles remote description setting
@@ -87,7 +103,7 @@ Coordinate the complete file transfer application flow using a flexible options-
 - **ReceiverApp**: Handles answer generation, file receiving, and completion signaling via `Run(ctx, *ReceiverOptions)`
 - **SenderOptions**: Configuration struct with required `FilePath` field for extensibility
 - **ReceiverOptions**: Configuration struct with required `DstPath` field for extensibility
-- Both coordinate between WebRTC, UI, and file services with unified run methods
+- Both coordinate between transport, UI, and processor services with unified run methods
 
 ### Service Interactions and Dependencies
 
@@ -110,15 +126,15 @@ DefaultConnectionStateHandler → PeerService
 Services are created and injected using concrete constructors:
 
 ```go
-func createServices() (*webrtc.PeerService, *webrtc.DataChannelService, *webrtc.SignalingService, *ui.ConsoleUI, *file.FileService) {
-    stateHandler := &webrtc.DefaultConnectionStateHandler{}
-    signalingService := webrtc.NewSignalingService()
-    peerService := webrtc.NewPeerService(cfg, stateHandler)
+func createServices() (*transport.PeerService, *transport.DataChannelService, *transport.SignalingService, *ui.ConsoleUI, *processor.DataProcessor) {
+    stateHandler := &transport.DefaultConnectionStateHandler{}
+    signalingService := transport.NewSignalingService()
+    peerService := transport.NewPeerService(cfg, stateHandler)
     consoleUI := ui.NewConsoleUI()
-    dataChannelService := webrtc.NewDataChannelService(cfg)
-    fileService := file.NewFileService()
+    dataChannelService := transport.NewDataChannelService(cfg)
+    dataProcessor := processor.NewDataProcessor()
     
-    return peerService, dataChannelService, signalingService, consoleUI, fileService
+    return peerService, dataChannelService, signalingService, consoleUI, dataProcessor
 }
 ```
 
@@ -133,11 +149,9 @@ func createServices() (*webrtc.PeerService, *webrtc.DataChannelService, *webrtc.
 
 2. **Data Channel Creation** 
    ```go
-   // DataChannelService sets up file sender with progress channels
-   progressCh := make(chan webrtc.ProgressUpdate, 1)
-   completionUpdateCh := make(chan webrtc.CompletionUpdate, 1)
-   _, err = s.dataChannelService.CreateFileSenderDataChannel(pc, "fileTransfer", 
-       s.fileService, opts.FilePath, progressCh, completionUpdateCh)
+   // DataChannelService creates sender data channel
+   dataChannel, err := s.dataChannelService.CreateFileSenderDataChannel(pc, "fileTransfer")
+   err = s.dataChannelService.SetupFileSender(dataChannel, s.dataProcessor, opts.FilePath)
    ```
 
 3. **SDP Exchange**
@@ -169,10 +183,7 @@ func createServices() (*webrtc.PeerService, *webrtc.DataChannelService, *webrtc.
    pc, err := r.peerService.CreatePeerConnection(ctx)
    
    // DataChannelService sets up receiver handlers
-   throughputCh := make(chan float64, 1)
-   completionUpdateCh := make(chan webrtc.CompletionUpdate, 1)
-   completionCh, err := r.dataChannelService.SetupFileReceiverWithCompletion(pc, 
-       r.fileService, opts.DstPath, throughputCh, completionUpdateCh)
+   completionCh, err := r.dataChannelService.SetupFileReceiver(pc, r.dataProcessor, opts.DstPath)
    
    // ConsoleUI and SignalingService handle SDP exchange
    offer, err := r.ui.InputSDP("Offer")
@@ -181,7 +192,7 @@ func createServices() (*webrtc.PeerService, *webrtc.DataChannelService, *webrtc.
 
 2. **File Reception** (automatic when data channel receives data)
    - DataChannelService handles incoming data channel messages
-   - FileService creates writer and handles file I/O
+   - DataProcessor creates writer and handles file I/O
    - Transfer completes on "EOF" message
 
 #### Key Communication Patterns
@@ -214,7 +225,7 @@ if dataChannel.BufferedAmount() > d.config.WebRTC.MaxBufferedAmount {
 
 ### Design Principles
 - **Direct dependency injection**: Concrete types are injected directly without interfaces
-- **Separation of concerns**: Clear boundaries between CLI, app logic, WebRTC, file handling, and UI
+- **Separation of concerns**: Clear boundaries between CLI, app logic, transport, data processing, and UI
 - **Channel-based coordination**: Asynchronous communication via Go channels for progress/status updates
 - **Options-based API**: Flexible configuration using struct-based options pattern
 - **Configuration management**: Centralized config with validation, environment variable support via Viper
@@ -325,7 +336,7 @@ The application follows a clean layered architecture:
 
 1. **CLI Layer** (`cmd/`): Flag parsing, validation, and user interface
 2. **Application Layer** (`internal/app/`): Business logic orchestration with options pattern
-3. **Service Layer** (`internal/webrtc/`, `internal/file/`, `internal/ui/`): Domain-specific services
+3. **Service Layer** (`internal/transport/`, `internal/processor/`, `internal/ui/`): Domain-specific services
 4. **Configuration Layer** (`internal/config/`): Centralized configuration management
 
 ### Extensibility Guidelines

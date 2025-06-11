@@ -6,9 +6,9 @@ import (
 	"os"
 
 	"yapfs/internal/config"
-	"yapfs/internal/file"
+	"yapfs/internal/processor"
 	"yapfs/internal/ui"
-	"yapfs/internal/webrtc"
+	"yapfs/internal/transport"
 )
 
 // SenderOptions configures the sender application behavior
@@ -22,21 +22,21 @@ type SenderOptions struct {
 // SenderApp implements sender application logic
 type SenderApp struct {
 	config             *config.Config
-	peerService        *webrtc.PeerService
-	dataChannelService *webrtc.DataChannelService
-	signalingService   *webrtc.SignalingService
+	peerService        *transport.PeerService
+	dataChannelService *transport.DataChannelService
+	signalingService   *transport.SignalingService
 	ui                 *ui.ConsoleUI
-	fileService        *file.FileService
+	dataProcessor      *processor.DataProcessor
 }
 
 // NewSenderApp creates a new sender application
 func NewSenderApp(
 	cfg *config.Config,
-	peerService *webrtc.PeerService,
-	dataChannelService *webrtc.DataChannelService,
-	signalingService *webrtc.SignalingService,
+	peerService *transport.PeerService,
+	dataChannelService *transport.DataChannelService,
+	signalingService *transport.SignalingService,
 	ui *ui.ConsoleUI,
-	fileService *file.FileService,
+	dataProcessor *processor.DataProcessor,
 ) *SenderApp {
 	return &SenderApp{
 		config:             cfg,
@@ -44,7 +44,7 @@ func NewSenderApp(
 		dataChannelService: dataChannelService,
 		signalingService:   signalingService,
 		ui:                 ui,
-		fileService:        fileService,
+		dataProcessor:      dataProcessor,
 	}
 }
 
@@ -74,33 +74,13 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	// Setup connection state handler
 	s.peerService.SetupConnectionStateHandler(pc, "sender")
 
-	// Create data channel for file transfer with channels
-	progressCh := make(chan webrtc.ProgressUpdate, 1)
-	completionUpdateCh := make(chan webrtc.CompletionUpdate, 1)
-
-	// Start goroutines to handle channel updates
-	go func() {
-		for update := range progressCh {
-			s.ui.UpdateProgress(update.Progress, update.Throughput, update.BytesSent, update.BytesTotal)
-		}
-	}()
-
-	go func() {
-		for update := range completionUpdateCh {
-			if update.Error != nil {
-				s.ui.ShowMessage(fmt.Sprintf("Transfer error: %v", update.Error))
-			} else {
-				s.ui.ShowMessage(update.Message)
-			}
-		}
-	}()
-
+	// Create data channel for file transfer
 	dataChannel, err := s.dataChannelService.CreateFileSenderDataChannel(pc, "fileTransfer")
 	if err != nil {
 		return fmt.Errorf("failed to create file sender data channel: %w", err)
 	}
 
-	err = s.dataChannelService.SetupFileSender(dataChannel, s.fileService, opts.FilePath, progressCh, completionUpdateCh)
+	err = s.dataChannelService.SetupFileSender(dataChannel, s.dataProcessor, opts.FilePath)
 	if err != nil {
 		return fmt.Errorf("failed to setup file sender: %w", err)
 	}
@@ -156,11 +136,6 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	s.ui.ShowMessage("Sender is ready. File will start sending when the data channel opens.")
 
 	// Block until context is cancelled
-	defer func() {
-		close(progressCh)
-		close(completionUpdateCh)
-	}()
-
 	<-ctx.Done()
 	return ctx.Err()
 }

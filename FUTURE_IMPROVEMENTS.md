@@ -128,38 +128,52 @@ func (s *SecureFileTransfer) ValidatePath(path string) error {
 - **Transfer quotas**: Limit file sizes and transfer counts
 - **Audit logging**: Log all transfer attempts and outcomes
 
-## 3. Enhanced UI with Progress Bar and Transfer Statistics
+## 3. Transfer Progress Monitoring and Reporting
 
 ### Current State
-- Basic console output with simple throughput reporting
+- Basic console output with minimal transfer feedback
 - No visual progress indication during file transfers
-- Limited transfer statistics and ETA information
-- Progress updates interrupt console flow
+- Simple byte counting without throughput statistics
+- No ETA or completion progress information
 
-### Proposed UI Improvements
+### Proposed Progress System
 
-#### Real-time Progress Bar
-- **Visual progress indicator**: ASCII progress bar showing transfer completion percentage
-- **Live statistics**: Real-time display of transfer speed, bytes transferred, and remaining time
-- **Non-intrusive updates**: Progress bar updates in-place without scrolling console
-- **Completion summary**: Final transfer statistics upon completion
+#### Comprehensive Progress Monitoring Service
+- **Transfer state tracking**: Monitor bytes transferred, throughput, and timing
+- **Progress calculation**: Real-time percentage completion and ETA estimation
+- **Multi-UI support**: Interface-based design supporting console, web, or GUI displays
+- **Thread-safe metrics**: Atomic operations for concurrent transfer monitoring
 
-#### Implementation Design
+#### Core Progress Architecture
 ```go
-type ProgressInfo struct {
+// Service for monitoring and calculating transfer progress
+type ProgressMonitor struct {
+    startTime    time.Time
+    totalBytes   int64
+    currentBytes *uint64  // atomic counter
+    reporter     ProgressReporter
+}
+
+// Interface for different UI implementations
+type ProgressReporter interface {
+    UpdateProgress(percentage float64, throughputMbps float64, bytesTransferred int64, totalBytes int64)
+    ReportCompletion(message string)
+    ReportError(err error)
+}
+
+// Console implementation with ASCII progress bar
+type ConsoleProgressReporter struct {
+    ui *ConsoleUI
+}
+
+// Real-time throughput and progress calculation
+type TransferMetrics struct {
     BytesTransferred int64
     TotalBytes       int64
     ThroughputMbps   float64
     Percentage       float64
     ElapsedTime      time.Duration
     ETADuration      time.Duration
-}
-
-type ProgressReporter interface {
-    StartProgressDisplay(totalBytes int64)
-    UpdateProgress(info ProgressInfo)
-    StopProgressDisplay()
-    ShowTransferComplete(bytesTransferred int64, elapsedTime time.Duration)
 }
 ```
 
@@ -783,6 +797,52 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 - **Reassembly complexity**: Proper ordering and integrity verification required
 - **Configuration tuning**: Optimal channel count depends on network conditions
 - **Error handling**: Need to handle partial failures gracefully
+
+## 7. Advanced Metadata and Transfer Control
+
+#### Enhanced Metadata Exchange Protocol
+```go
+type MetadataExchangeProtocol struct {
+    Type    string       `json:"type"`    // "metadata", "accept", "reject"
+    Data    FileMetadata `json:"data,omitempty"`
+    Message string       `json:"message,omitempty"` // Rejection reason or custom message
+}
+
+// Sender waits for receiver confirmation
+func (s *Sender) WaitForReceiverConfirmation(timeout time.Duration) error {
+    select {
+    case response := <-s.confirmationCh:
+        if response.Type == "reject" {
+            return fmt.Errorf("receiver rejected file: %s", response.Message)
+        }
+        return nil
+    case <-time.After(timeout):
+        return fmt.Errorf("receiver confirmation timeout")
+    }
+}
+```
+
+#### Timeout Handling and Graceful Degradation
+```go
+type TimeoutConfig struct {
+    MetadataExchange time.Duration // 30 seconds
+    UserConfirmation time.Duration // 60 seconds
+    ConnectionSetup  time.Duration // 45 seconds
+}
+
+func (r *Receiver) HandleTimeouts(config TimeoutConfig) {
+    // Graceful handling of various timeout scenarios
+    // - Metadata exchange timeout: retry or fallback to basic mode
+    // - User confirmation timeout: default accept/reject behavior
+    // - Connection timeout: retry with exponential backoff
+}
+```
+
+### Implementation Notes
+- **Optional feature**: Can be enabled/disabled via configuration
+- **Backward compatibility**: Maintains current auto-accept behavior as default
+- **Configurable timeouts**: All timeout values should be configurable
+- **Clear error messages**: Provide helpful feedback for timeout scenarios
 
 ## Implementation Roadmap
 

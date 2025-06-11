@@ -9,9 +9,9 @@ import (
 	"syscall"
 
 	"yapfs/internal/config"
-	"yapfs/internal/file"
+	"yapfs/internal/processor"
+	"yapfs/internal/transport"
 	"yapfs/internal/ui"
-	"yapfs/internal/webrtc"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -112,17 +112,17 @@ func createContext() context.Context {
 }
 
 // createServices creates and wires up all the application services
-func createServices() (*webrtc.PeerService, *webrtc.DataChannelService, *webrtc.SignalingService, *ui.ConsoleUI, *file.FileService) {
+func createServices() (*transport.PeerService, *transport.DataChannelService, *transport.SignalingService, *ui.ConsoleUI, *processor.DataProcessor) {
 	// Create connection state handler
-	stateHandler := &webrtc.DefaultConnectionStateHandler{}
+	stateHandler := &transport.DefaultConnectionStateHandler{}
 
 	// Create services
-	signalingService := webrtc.NewSignalingService()
-	peerService := webrtc.NewPeerService(cfg, stateHandler)
+	signalingService := transport.NewSignalingService()
+	peerService := transport.NewPeerService(cfg, stateHandler)
 	consoleUI := ui.NewConsoleUI()
 
-	dataChannelService := webrtc.NewDataChannelService(cfg)
-	fileService := file.NewFileService()
+	dataChannelService := transport.NewDataChannelService(cfg)
+	dataProcessor := processor.NewDataProcessor()
 
-	return peerService, dataChannelService, signalingService, consoleUI, fileService
+	return peerService, dataChannelService, signalingService, consoleUI, dataProcessor
 }

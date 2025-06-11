@@ -74,7 +74,7 @@ func validateSendFlags(flags *SendFlags) error {
 // runSenderApp creates and runs the sender application
 func runSenderApp(flags *SendFlags) error {
 	ctx := createContext()
-	peerService, dataChannelService, signalingService, ui, fileService := createServices()
+	peerService, dataChannelService, signalingService, ui, dataProcessor := createServices()
 
 	// Future flag processing can be easily added here:
 	// if flags.Verbose {
@@ -90,6 +90,6 @@ func runSenderApp(flags *SendFlags) error {
 		FilePath: flags.FilePath,
 	}
 
-	senderApp := app.NewSenderApp(cfg, peerService, dataChannelService, signalingService, ui, fileService)
+	senderApp := app.NewSenderApp(cfg, peerService, dataChannelService, signalingService, ui, dataProcessor)
 	return senderApp.Run(ctx, opts)
 }
