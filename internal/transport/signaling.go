@@ -60,6 +60,13 @@ func (s *SignalingService) WaitForICEGathering(peerConn *webrtc.PeerConnection) 
 	return webrtc.GatheringCompletePromise(peerConn)
 }
 
+// TODO: websocket trickle ICE
+// func (s *SignalingService) StreamICECandidates(peerConn *webrtc.PeerConnection) {
+// 	peerConn.OnICECandidate(func(i *webrtc.ICECandidate) {
+// 		print(i)
+// 	})
+// }
+
 // EncodeSessionDescription encodes a session description to base64
 func (s *SignalingService) EncodeSessionDescription(sd webrtc.SessionDescription) (string, error) {
 	bytes, err := json.Marshal(sd)

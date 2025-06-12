@@ -2,7 +2,6 @@ package transport
 
 import (
 	"log"
-	"os"
 
 	"yapfs/internal/config"
 	"yapfs/internal/processor"
@@ -30,17 +29,14 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, dat
 	peerConn.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
 		log.Printf("Received data channel: %s-%d", dataChannel.Label(), dataChannel.ID())
 
-		var fileWriter *os.File
-		var totalBytesReceived uint64
-
 		dataChannel.OnOpen(func() {
 			log.Printf("File transfer data channel opened: %s-%d", dataChannel.Label(), dataChannel.ID())
 
-			// Create destination file
-			var err error
-			fileWriter, err = dataProcessor.CreateWriter(destPath)
+			// Prepare file for receiving using DataProcessor
+			err := dataProcessor.PrepareFileForReceiving(destPath)
 			if err != nil {
-				log.Printf("Error creating destination file: %v", err)
+				log.Printf("Error preparing file for receiving: %v", err)
+				close(doneCh)
 				return
 			}
 
@@ -48,40 +44,37 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, dat
 		})
 
 		dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
-			if fileWriter == nil {
-				log.Printf("Received data but file not ready")
-				return
-			}
-
 			if string(msg.Data) == "EOF" {
-				log.Printf("File transfer complete: %d bytes received", totalBytesReceived)
-				fileWriter.Close()
+				// Finish receiving and get total bytes
+				totalBytes, err := dataProcessor.FinishReceiving()
+				if err != nil {
+					log.Printf("Error finishing file reception: %v", err)
+				} else {
+					log.Printf("File transfer complete: %d bytes received", totalBytes)
+				}
 				// Signal completion
 				close(doneCh)
 				return
 			}
 
-			n, err := fileWriter.Write(msg.Data)
+			// Write data using DataProcessor
+			err := dataProcessor.WriteData(msg.Data)
 			if err != nil {
-				log.Printf("Error writing to file: %v", err)
+				log.Printf("Error writing data: %v", err)
 				return
 			}
-
-			totalBytesReceived += uint64(n)
 		})
 
 		dataChannel.OnClose(func() {
 			log.Printf("File transfer data channel closed")
-			if fileWriter != nil {
-				fileWriter.Close()
-			}
+			// Clean up any open files
+			dataProcessor.Close()
 		})
 
 		dataChannel.OnError(func(err error) {
 			log.Printf("File transfer data channel error: %v", err)
-			if fileWriter != nil {
-				fileWriter.Close()
-			}
+			// Clean up any open files
+			dataProcessor.Close()
 		})
 	})
 

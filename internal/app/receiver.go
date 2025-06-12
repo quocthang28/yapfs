@@ -55,6 +55,9 @@ func (r *ReceiverApp) Run(opts *ReceiverOptions) error {
 
 	r.ui.ShowMessage(fmt.Sprintf("Preparing to receive file to: %s", opts.DestPath))
 
+	// Ensure DataProcessor cleanup
+	defer r.dataProcessor.Close()
+
 	// Create peer connection
 	peerConn, err := r.peerService.CreatePeerConnection()
 	if err != nil {

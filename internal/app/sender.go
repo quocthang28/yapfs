@@ -73,13 +73,20 @@ func (s *SenderApp) Run(opts *SenderOptions) error {
 	// Setup connection state handler
 	s.peerService.SetupConnectionStateHandler(peerConn, "sender")
 
+	// Prepare file for sending using DataProcessor
+	err = s.dataProcessor.PrepareFileForSending(opts.FilePath)
+	if err != nil {
+		return fmt.Errorf("failed to prepare file for sending: %w", err)
+	}
+	defer s.dataProcessor.Close()
+
 	// Create data channel for file transfer
 	dataChannel, err := s.dataChannelService.CreateFileSenderDataChannel(peerConn, "fileTransfer")
 	if err != nil {
 		return fmt.Errorf("failed to create file sender data channel: %w", err)
 	}
 
-	doneCh, err := s.dataChannelService.SetupFileSender(dataChannel, s.dataProcessor, opts.FilePath)
+	doneCh, err := s.dataChannelService.SetupFileSender(dataChannel, s.dataProcessor)
 	if err != nil {
 		return fmt.Errorf("failed to setup file sender: %w", err)
 	}

@@ -27,9 +27,9 @@ func (d *DataChannelService) CreateFileSenderDataChannel(peerConn *webrtc.PeerCo
 	return d.sender.CreateFileSenderDataChannel(peerConn, label)
 }
 
-// SetupFileSender configures file sending for a data channel and returns a completion channel
-func (d *DataChannelService) SetupFileSender(dataChannel *webrtc.DataChannel, dataProcessor *processor.DataProcessor, filePath string) (<-chan struct{}, error) {
-	return d.sender.SetupFileSender(dataChannel, dataProcessor, filePath)
+// SetupFileSender configures file sending for a data channel using prepared data processor
+func (d *DataChannelService) SetupFileSender(dataChannel *webrtc.DataChannel, dataProcessor *processor.DataProcessor) (<-chan struct{}, error) {
+	return d.sender.SetupFileSender(dataChannel, dataProcessor)
 }
 
 // SetupFileReceiver sets up handlers for receiving files and returns a completion channel
