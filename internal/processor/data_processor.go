@@ -99,7 +99,7 @@ func (d *DataProcessor) PrepareFileForSending(filePath string) error {
 		return fmt.Errorf("failed to get file info: %w", err)
 	}
 
-	log.Printf("File prepared for sending: %s, size: %d bytes (%s)", 
+	log.Printf("File prepared for sending: %s, size: %d bytes (%s)",
 		filePath, stat.Size(), d.FormatFileSize(stat.Size()))
 
 	d.fileReader = &fileReader{
@@ -197,6 +197,11 @@ func (d *DataProcessor) WriteData(data []byte) error {
 
 	d.fileWriter.totalBytesWritten += uint64(n)
 	return nil
+}
+
+// WriteDataChunk writes a data chunk to the prepared file
+func (d *DataProcessor) WriteDataChunk(data []byte) error {
+	return d.WriteData(data)
 }
 
 // FinishReceiving completes the file reception and returns total bytes written

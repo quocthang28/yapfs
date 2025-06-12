@@ -2,6 +2,7 @@ package transport
 
 import (
 	"yapfs/internal/config"
+	"yapfs/internal/coordinator"
 	"yapfs/internal/processor"
 
 	"github.com/pion/webrtc/v4"
@@ -27,12 +28,17 @@ func (d *DataChannelService) CreateFileSenderDataChannel(peerConn *webrtc.PeerCo
 	return d.sender.CreateFileSenderDataChannel(peerConn, label)
 }
 
-// SetupFileSender configures file sending using prepared data processor
-func (d *DataChannelService) SetupFileSender(dataProcessor *processor.DataProcessor) (<-chan struct{}, error) {
-	return d.sender.SetupFileSender(dataProcessor)
+// SetupSenderChannelHandlers sets up data channel handlers for sending with channel communication
+func (d *DataChannelService) SetupSenderChannelHandlers(channels *coordinator.SenderChannels, totalBytes int64) error {
+	return d.sender.SetupChannelHandlers(channels, totalBytes)
 }
 
-// SetupFileReceiver sets up handlers for receiving files and returns a completion channel
-func (d *DataChannelService) SetupFileReceiver(peerConn *webrtc.PeerConnection, dataProcessor *processor.DataProcessor, destPath string) (<-chan struct{}, error) {
-	return d.receiver.SetupFileReceiver(peerConn, dataProcessor, destPath)
+// SendDataChunk sends a data chunk through the data channel
+func (d *DataChannelService) SendDataChunk(chunk processor.DataChunk) error {
+	return d.sender.SendDataChunk(chunk)
+}
+
+// SetupFileReceiverChannels sets up handlers for receiving files with channel communication
+func (d *DataChannelService) SetupFileReceiverChannels(peerConn *webrtc.PeerConnection, channels *coordinator.ReceiverChannels, destPath string) error {
+	return d.receiver.SetupChannelHandlers(peerConn, channels, destPath)
 }

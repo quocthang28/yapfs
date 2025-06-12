@@ -182,4 +182,3 @@ func isValidBase64Line(line string) bool {
 	}
 	return true
 }
-

@@ -1,10 +1,12 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 
 	"yapfs/internal/config"
+	"yapfs/internal/coordinator"
 	"yapfs/internal/processor"
 	"yapfs/internal/transport"
 	"yapfs/internal/ui"
@@ -26,6 +28,7 @@ type SenderApp struct {
 	signalingService   *transport.SignalingService
 	ui                 *ui.ConsoleUI
 	dataProcessor      *processor.DataProcessor
+	coordinator        *coordinator.FileTransferCoordinator
 }
 
 // NewSenderApp creates a new sender application
@@ -37,6 +40,8 @@ func NewSenderApp(
 	ui *ui.ConsoleUI,
 	dataProcessor *processor.DataProcessor,
 ) *SenderApp {
+	coord := coordinator.NewFileTransferCoordinator(cfg, dataProcessor, dataChannelService)
+	
 	return &SenderApp{
 		config:             cfg,
 		peerService:        peerService,
@@ -44,6 +49,7 @@ func NewSenderApp(
 		signalingService:   signalingService,
 		ui:                 ui,
 		dataProcessor:      dataProcessor,
+		coordinator:        coord,
 	}
 }
 
@@ -73,23 +79,13 @@ func (s *SenderApp) Run(opts *SenderOptions) error {
 	// Setup connection state handler
 	s.peerService.SetupConnectionStateHandler(peerConn, "sender")
 
-	// Prepare file for sending using DataProcessor
-	err = s.dataProcessor.PrepareFileForSending(opts.FilePath)
+	// Use coordinator to set up file transfer
+	ctx := context.Background()
+	doneCh, err := s.coordinator.CoordinateSender(ctx, peerConn, opts.FilePath)
 	if err != nil {
-		return fmt.Errorf("failed to prepare file for sending: %w", err)
+		return fmt.Errorf("failed to coordinate file sending: %w", err)
 	}
 	defer s.dataProcessor.Close()
-
-	// Create data channel for file transfer
-	err = s.dataChannelService.CreateFileSenderDataChannel(peerConn, "fileTransfer")
-	if err != nil {
-		return fmt.Errorf("failed to create file sender data channel: %w", err)
-	}
-
-	doneCh, err := s.dataChannelService.SetupFileSender(s.dataProcessor)
-	if err != nil {
-		return fmt.Errorf("failed to setup file sender: %w", err)
-	}
 
 	// Create offer
 	_, err = s.signalingService.CreateOffer(peerConn)

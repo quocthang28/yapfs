@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"yapfs/internal/config"
+	"yapfs/internal/coordinator"
 	"yapfs/internal/processor"
 
 	"github.com/pion/webrtc/v4"
@@ -56,7 +57,7 @@ func (s *SenderChannel) SetupFileSender(dataProcessor *processor.DataProcessor) 
 			close(doneCh)
 			return
 		}
-		
+
 		log.Printf("File data channel opened: %s-%d. Starting file transfer, file size: %d bytes",
 			s.dataChannel.Label(), s.dataChannel.ID(), fileInfo.Size())
 
@@ -128,4 +129,49 @@ func (s *SenderChannel) SetupFileSender(dataProcessor *processor.DataProcessor) 
 	})
 
 	return doneCh, nil
+}
+
+// SetupChannelHandlers sets up data channel handlers with channel communication
+func (s *SenderChannel) SetupChannelHandlers(channels *coordinator.SenderChannels, totalBytes int64) error {
+	if s.dataChannel == nil {
+		return fmt.Errorf("data channel not created, call CreateFileSenderDataChannel first")
+	}
+
+	// Set up flow control
+	s.dataChannel.SetBufferedAmountLowThreshold(s.config.WebRTC.BufferedAmountLowThreshold)
+	s.dataChannel.OnBufferedAmountLow(func() {
+		select {
+		case channels.FlowControl <- coordinator.FlowControlEvent{Type: "resume"}:
+		default:
+		}
+	})
+
+	// Set up open handler
+	s.dataChannel.OnOpen(func() {
+		log.Printf("File data channel opened: %s-%d. Starting file transfer, file size: %d bytes",
+			s.dataChannel.Label(), s.dataChannel.ID(), totalBytes)
+	})
+
+	return nil
+}
+
+// SendDataChunk sends a data chunk through the data channel
+func (s *SenderChannel) SendDataChunk(chunk processor.DataChunk) error {
+	if s.dataChannel == nil {
+		return fmt.Errorf("data channel not created")
+	}
+
+	if chunk.EOF {
+		// Send EOF marker
+		return s.dataChannel.Send([]byte("EOF"))
+	}
+
+	// Check flow control before sending
+	if s.dataChannel.BufferedAmount() > s.config.WebRTC.MaxBufferedAmount {
+		// Signal flow control pause (this would be handled by coordinator)
+		return fmt.Errorf("buffer full, flow control required")
+	}
+
+	// Send data chunk
+	return s.dataChannel.Send(chunk.Data)
 }

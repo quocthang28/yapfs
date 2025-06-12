@@ -1,9 +1,11 @@
 package app
 
 import (
+	"context"
 	"fmt"
 
 	"yapfs/internal/config"
+	"yapfs/internal/coordinator"
 	"yapfs/internal/processor"
 	"yapfs/internal/transport"
 	"yapfs/internal/ui"
@@ -25,6 +27,7 @@ type ReceiverApp struct {
 	signalingService   *transport.SignalingService
 	ui                 *ui.ConsoleUI
 	dataProcessor      *processor.DataProcessor
+	coordinator        *coordinator.FileTransferCoordinator
 }
 
 // NewReceiverApp creates a new receiver application
@@ -36,6 +39,8 @@ func NewReceiverApp(
 	ui *ui.ConsoleUI,
 	dataProcessor *processor.DataProcessor,
 ) *ReceiverApp {
+	coord := coordinator.NewFileTransferCoordinator(cfg, dataProcessor, dataChannelService)
+	
 	return &ReceiverApp{
 		config:             cfg,
 		peerService:        peerService,
@@ -43,6 +48,7 @@ func NewReceiverApp(
 		signalingService:   signalingService,
 		ui:                 ui,
 		dataProcessor:      dataProcessor,
+		coordinator:        coord,
 	}
 }
 
@@ -72,10 +78,11 @@ func (r *ReceiverApp) Run(opts *ReceiverOptions) error {
 	// Setup connection state handler
 	r.peerService.SetupConnectionStateHandler(peerConn, "receiver")
 
-	// Setup file receiver
-	doneCh, err := r.dataChannelService.SetupFileReceiver(peerConn, r.dataProcessor, opts.DestPath)
+	// Use coordinator to set up file transfer
+	ctx := context.Background()
+	doneCh, err := r.coordinator.CoordinateReceiver(ctx, peerConn, opts.DestPath)
 	if err != nil {
-		return fmt.Errorf("failed to setup file receiver data channel handler: %w", err)
+		return fmt.Errorf("failed to coordinate file receiving: %w", err)
 	}
 
 	// Wait for offer SDP from user

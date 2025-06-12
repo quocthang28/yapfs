@@ -63,9 +63,21 @@ Handles file sending logic:
 #### **ReceiverChannel** (`internal/transport/receiver.go`)
 Handles file receiving logic:
 - Sets up receiver data channel handlers
-- Manages file writing and progress tracking
-- Handles incoming data channel messages
-- Processes EOF signals for completion
+- Manages incoming data channel messages through event-driven channels
+- Provides channel-based communication interface for received data
+- Processes EOF signals and error propagation through channels
+
+#### **FileTransferCoordinator** (`internal/transport/coordinator.go`)
+Mediates between transport and processing layers using channel-based communication:
+- **Eliminates tight coupling** between DataChannelService and DataProcessor
+- **Event-driven coordination** using well-defined communication channels
+- **Centralized flow control** management across transport and processing layers
+- **Progress monitoring** and error handling aggregation
+- **SenderChannels**: Coordinates file sending with data requests, responses, flow control, progress, and error channels
+- **ReceiverChannels**: Coordinates file receiving with data delivery, flow control, progress, and error channels
+- **CoordinateSender()**: Orchestrates complete sender flow from file preparation to transfer completion
+- **CoordinateReceiver()**: Orchestrates complete receiver flow from setup to file writing completion
+- **Context-based lifecycle management** with proper cancellation support
 
 #### **SignalingService** (`internal/transport/signaling.go`)
 Manages SDP offer/answer exchange and encoding/decoding:
@@ -97,32 +109,36 @@ Manages file operations for P2P file sharing:
 - Handles directory creation for destination paths
 
 #### **SenderApp/ReceiverApp** (`internal/app/`)
-Coordinate the complete file transfer application flow using a flexible options-based approach:
-- **SenderApp**: Orchestrates offer creation, file sending, and connection management via `Run(ctx, *SenderOptions)`
-- **ReceiverApp**: Handles answer generation, file receiving, and completion signaling via `Run(ctx, *ReceiverOptions)`
+Coordinate the complete file transfer application flow using FileTransferCoordinator and a flexible options-based approach:
+- **SenderApp**: Orchestrates offer creation, file sending, and connection management via `Run(*SenderOptions)` using FileTransferCoordinator
+- **ReceiverApp**: Handles answer generation, file receiving, and completion signaling via `Run(*ReceiverOptions)` using FileTransferCoordinator
 - **SenderOptions**: Configuration struct with required `FilePath` field for extensibility
 - **ReceiverOptions**: Configuration struct with required `DstPath` field for extensibility
-- Both coordinate between transport, UI, and processor services with unified run methods
+- Both use FileTransferCoordinator for decoupled communication between transport, processing, and UI layers
+- Context-based coordination with proper cancellation and timeout support
 
 ### Service Interactions and Dependencies
 
-The application uses **direct dependency injection** with concrete service types. Services coordinate through well-defined method calls and channel-based communication for asynchronous operations.
+The application uses **direct dependency injection** with concrete service types and **channel-based coordination** through FileTransferCoordinator for decoupled service communication.
 
 #### Service Dependency Graph
 ```
 SenderApp/ReceiverApp (orchestrators)
 ├── PeerService (manages WebRTC connections)
 ├── SignalingService (handles SDP exchange)  
-├── DataChannelService (manages data transfer & flow control)
+├── FileTransferCoordinator (mediates transport ↔ processing communication)
+│   ├── DataChannelService (manages WebRTC data channels)
+│   └── DataProcessor (handles file I/O operations)
 ├── ConsoleUI (user interaction)
-└── FileService (file I/O operations)
+└── Config (application configuration)
 
-Config → PeerService, DataChannelService
-DefaultConnectionStateHandler → PeerService
+Channel-based Communication:
+FileTransferCoordinator ↔ DataChannelService (via SenderChannels/ReceiverChannels)
+FileTransferCoordinator ↔ DataProcessor (via file operation methods)
 ```
 
 #### Service Instantiation (in `cmd/root.go`)
-Services are created and injected using concrete constructors:
+Services are created and injected using concrete constructors with FileTransferCoordinator managing cross-layer communication:
 
 ```go
 func createServices() (*transport.PeerService, *transport.DataChannelService, *transport.SignalingService, *ui.ConsoleUI, *processor.DataProcessor) {
@@ -133,6 +149,9 @@ func createServices() (*transport.PeerService, *transport.DataChannelService, *t
     dataChannelService := transport.NewDataChannelService(cfg)
     dataProcessor := processor.NewDataProcessor()
     
+    // FileTransferCoordinator is created within SenderApp/ReceiverApp constructors
+    // coordinator := transport.NewFileTransferCoordinator(cfg, dataProcessor, dataChannelService)
+    
     return peerService, dataChannelService, signalingService, consoleUI, dataProcessor
 }
 ```
@@ -142,22 +161,28 @@ func createServices() (*transport.PeerService, *transport.DataChannelService, *t
 1. **Connection Setup**
    ```go
    // PeerService creates and monitors WebRTC connection
-   pc, err := s.peerService.CreatePeerConnection(ctx)
+   pc, err := s.peerService.CreatePeerConnection()
    s.peerService.SetupConnectionStateHandler(pc, "sender")
    ```
 
-2. **Data Channel Creation** 
+2. **Coordinator-Based File Transfer Setup** 
    ```go
-   // DataChannelService creates sender data channel
-   dataChannel, err := s.dataChannelService.CreateFileSenderDataChannel(pc, "fileTransfer")
-   err = s.dataChannelService.SetupFileSender(dataChannel, s.dataProcessor, opts.FilePath)
+   // FileTransferCoordinator orchestrates all file transfer operations
+   ctx := context.Background()
+   doneCh, err := s.coordinator.CoordinateSender(ctx, pc, opts.FilePath)
+   
+   // Coordinator internally:
+   // - Prepares file using DataProcessor
+   // - Creates data channel via DataChannelService  
+   // - Sets up channel-based communication between transport and processing
+   // - Manages flow control, progress monitoring, and error handling
    ```
 
 3. **SDP Exchange**
    ```go
    // SignalingService creates offer and waits for ICE gathering
-   _, err = s.signalingService.CreateOffer(ctx, pc)
-   err = s.signalingService.WaitForICEGathering(ctx, pc)
+   _, err = s.signalingService.CreateOffer(pc)
+   err = s.signalingService.WaitForICEGathering(pc)
    encodedOffer, err := s.signalingService.EncodeSessionDescription(*finalOffer)
    
    // ConsoleUI handles user interaction
@@ -169,68 +194,148 @@ func createServices() (*transport.PeerService, *transport.DataChannelService, *t
    err = s.signalingService.SetRemoteDescription(pc, answerSD)
    ```
 
-4. **File Transfer** (automatic when data channel opens)
-   - DataChannelService coordinates with FileService for chunked reading
-   - Progress updates flow through channels to ConsoleUI
-   - Flow control prevents buffer overflow
+4. **Channel-Based File Transfer** (coordinated by FileTransferCoordinator)
+   - **SenderChannels**: Data requests, responses, flow control, progress, errors
+   - **Transport Layer**: Manages WebRTC data channel and buffer state
+   - **Processing Layer**: Handles file reading and chunking
+   - **Coordinator**: Mediates communication, aggregates progress, manages flow control
 
 #### Receive Operation Service Flow
 
 1. **Setup and SDP Exchange**
    ```go
    // PeerService creates connection
-   pc, err := r.peerService.CreatePeerConnection(ctx)
+   pc, err := r.peerService.CreatePeerConnection()
    
-   // DataChannelService sets up receiver handlers
-   completionCh, err := r.dataChannelService.SetupFileReceiver(pc, r.dataProcessor, opts.DstPath)
+   // FileTransferCoordinator orchestrates receiver setup
+   ctx := context.Background()
+   doneCh, err := r.coordinator.CoordinateReceiver(ctx, pc, opts.DstPath)
+   
+   // Coordinator internally:
+   // - Sets up data channel handlers via DataChannelService
+   // - Prepares file receiving via DataProcessor  
+   // - Creates ReceiverChannels for communication
+   // - Starts monitoring goroutines for progress and errors
    
    // ConsoleUI and SignalingService handle SDP exchange
    offer, err := r.ui.InputSDP("Offer")
    // ... SignalingService processes offer and creates answer
    ```
 
-2. **File Reception** (automatic when data channel receives data)
-   - DataChannelService handles incoming data channel messages
-   - DataProcessor creates writer and handles file I/O
-   - Transfer completes on "EOF" message
+2. **Channel-Based File Reception** (coordinated by FileTransferCoordinator)
+   - **ReceiverChannels**: Data delivery, flow control, progress, errors
+   - **Transport Layer**: Receives WebRTC data channel messages, forwards to channels
+   - **Processing Layer**: Writes received data chunks to file
+   - **Coordinator**: Manages file lifecycle, aggregates progress, handles completion
 
 #### Key Communication Patterns
 
-**Channel-Based Updates:**
+**Channel-Based Coordination:**
 ```go
-// Services communicate asynchronously via typed channels
-type ProgressUpdate struct {
-    BytesSent   int64
-    BytesTotal  int64  
-    Throughput  float64
-    Percentage  float64
+// FileTransferCoordinator uses typed channels for cross-layer communication
+type SenderChannels struct {
+    DataRequest  chan struct{}                 // Transport → Processing: Request next chunk
+    DataResponse chan processor.DataChunk      // Processing → Transport: Provide chunk data  
+    FlowControl  chan FlowControlEvent         // Bidirectional flow control signaling
+    Progress     chan ProgressUpdate           // Progress reporting aggregation
+    Error        chan error                    // Error propagation across layers
+    Complete     chan struct{}                 // Transfer completion signaling
 }
 
-// Progress flows: DataChannelService → progressCh → ConsoleUI
+// Progress flows: DataProcessor → Coordinator → Application Layer
+// Data flows: DataProcessor → Coordinator → DataChannelService → WebRTC
 ```
 
 **Flow Control Coordination:**
 ```go
-// DataChannelService implements backpressure
-if dataChannel.BufferedAmount() > d.config.WebRTC.MaxBufferedAmount {
-    <-sendMoreCh  // Wait for buffer to drain
+// Centralized flow control managed by FileTransferCoordinator
+// Transport layer signals buffer state:
+s.dataChannel.OnBufferedAmountLow(func() {
+    channels.FlowControl <- FlowControlEvent{Type: "resume"}
+})
+
+// Coordinator mediates between transport buffer state and processing rate
+if s.dataChannel.BufferedAmount() > s.config.WebRTC.MaxBufferedAmount {
+    return fmt.Errorf("buffer full, flow control required")
 }
 ```
 
 **Error Propagation:**
-- Services return errors to App layer for handling
-- Connection state changes trigger cleanup across services
-- UI displays errors with consistent formatting
+- Errors propagate through dedicated error channels to FileTransferCoordinator
+- Coordinator aggregates and forwards errors to Application layer
+- Context-based cancellation ensures proper cleanup across all services
+- UI displays coordinated error messages with consistent formatting
 
 ### Design Principles
 - **Direct dependency injection**: Concrete types are injected directly without interfaces
-- **Separation of concerns**: Clear boundaries between CLI, app logic, transport, data processing, and UI
-- **Channel-based coordination**: Asynchronous communication via Go channels for progress/status updates
+- **Channel-based decoupling**: FileTransferCoordinator eliminates tight coupling between transport and processing layers
+- **Event-driven architecture**: Services communicate through well-defined channels for asynchronous coordination  
+- **Separation of concerns**: Clear boundaries between CLI, app logic, transport, data processing, and UI with coordinator mediation
+- **Centralized coordination**: FileTransferCoordinator manages cross-layer communication, flow control, and progress aggregation
+- **Context-based lifecycle**: Proper cancellation and timeout support throughout the application
 - **Options-based API**: Flexible configuration using struct-based options pattern
 - **Configuration management**: Centralized config with validation, environment variable support via Viper
 - **Flag handling**: Struct-based flag definitions with built-in Cobra validation
-- **Error handling**: Proper error propagation with context
-- **Exported types**: All service types are exported for direct usage
+- **Error handling**: Channel-based error propagation with centralized aggregation and context support
+- **Exported types**: All service types are exported for direct usage with coordinator managing interactions
+
+### FileTransferCoordinator Architecture Details
+
+#### Channel Communication Patterns
+
+The FileTransferCoordinator implements a sophisticated channel-based communication system that eliminates tight coupling between the transport and processing layers:
+
+**Sender Communication Flow:**
+```go
+// 1. Coordinator creates SenderChannels for communication
+channels := &SenderChannels{
+    DataRequest:  make(chan struct{}, 1),           // Transport requests chunks
+    DataResponse: make(chan processor.DataChunk, 10), // Processing provides chunks
+    FlowControl:  make(chan FlowControlEvent, 1),    // Flow control signaling
+    Progress:     make(chan ProgressUpdate, 1),      // Progress aggregation
+    Error:        make(chan error, 1),               // Error propagation
+    Complete:     make(chan struct{}),               // Completion signaling
+}
+
+// 2. Transport layer (SenderChannel) communicates buffer state
+s.dataChannel.OnBufferedAmountLow(func() {
+    channels.FlowControl <- FlowControlEvent{Type: "resume"}
+})
+
+// 3. Processing layer (DataProcessor) provides data chunks
+dataCh, errCh := dataProcessor.StartFileTransfer(chunkSize)
+
+// 4. Coordinator mediates all communication between layers
+```
+
+**Receiver Communication Flow:**
+```go
+// 1. Coordinator creates ReceiverChannels for communication  
+channels := &ReceiverChannels{
+    DataReceived: make(chan processor.DataChunk, 10), // Incoming data delivery
+    FlowControl:  make(chan FlowControlEvent, 1),     // Flow control events
+    Progress:     make(chan ProgressUpdate, 1),       // Progress reporting
+    Error:        make(chan error, 1),                // Error propagation  
+    Complete:     chan struct{}),                     // Completion signaling
+}
+
+// 2. Transport layer forwards received data through channels
+dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
+    channels.DataReceived <- processor.DataChunk{Data: msg.Data, EOF: false}
+})
+
+// 3. Coordinator handles file writing and progress aggregation
+```
+
+#### Benefits of Channel-Based Architecture
+
+1. **Eliminates Direct Dependencies**: Transport layer no longer directly depends on DataProcessor
+2. **Enables Independent Testing**: Each service can be tested in isolation with mock channels
+3. **Centralized Flow Control**: All flow control logic managed in one place by coordinator
+4. **Consistent Error Handling**: Errors propagate through dedicated channels to coordinator
+5. **Progress Aggregation**: Progress updates from multiple sources consolidated by coordinator
+6. **Context-Based Cancellation**: Proper cleanup across all services using context cancellation
+7. **Flexible Communication**: Easy to add new communication patterns without changing service interfaces
 
 ## Running the Code
 
