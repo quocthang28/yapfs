@@ -243,7 +243,7 @@ Ready to receive file...
   Avg Speed: 15.8 MB/s
 ```
 
-## 4. SDP Exchange via Cloudflare Worker + KV
+## 4. Automated SDP Exchange
 
 ### Current Limitations
 - Manual copy/paste of SDP is error-prone and cumbersome
@@ -251,361 +251,576 @@ Ready to receive file...
 - Difficult to use programmatically
 - Poor user experience for non-technical users
 
-### Proposed Solution: Cloudflare Worker + KV
+### Proposed Solution: Firebase Realtime Database SDP Exchange
 
 #### Architecture Overview
 ```
-Sender                    Cloudflare Worker + KV              Receiver
+Sender                    Firebase Realtime DB                 Receiver
   |                              |                               |
-  |---> POST /offer/{id} ------->|                               |
-  |     (SDP offer)              |---> Store in KV               |
+  |---> Write /sessions/{id}/offer                              |
+  |     (SDP offer)              |                               |
   |                              |                               |
-  |                              |<--- GET /offer/{id} <---------|
-  |                              |     (retrieve SDP offer)      |
+  |                              |<--- Listen /sessions/{id} <---|
+  |                              |     (real-time updates)       |
   |                              |                               |
-  |<--- GET /answer/{id} <-------|<--- POST /answer/{id} <-------|
-  |     (retrieve SDP answer)    |     (SDP answer)              |
+  |<--- Listen /sessions/{id} ---|---> Write /sessions/{id}/answer
+  |     (real-time updates)      |     (SDP answer)              |
 ```
 
-#### Cloudflare Worker Implementation
-```javascript
-// Simplified Cloudflare Worker code
-export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-    const [, type, id] = url.pathname.split('/');
-    
-    if (request.method === 'POST') {
-      // Store SDP offer/answer
-      const sdp = await request.text();
-      await env.SDP_KV.put(`${type}:${id}`, sdp, { expirationTtl: 300 });
-      return new Response('OK');
-    }
-    
-    if (request.method === 'GET') {
-      // Retrieve SDP offer/answer
-      const sdp = await env.SDP_KV.get(`${type}:${id}`);
-      return new Response(sdp || 'Not found', { 
-        status: sdp ? 200 : 404 
-      });
+#### Firebase Database Structure
+```json
+{
+  "sessions": {
+    "{sessionId}": {
+      "offer": "base64_encoded_sdp_offer",
+      "answer": "base64_encoded_sdp_answer",
+      "candidates": {
+        "sender": {
+          "{timestamp}": {
+            "candidate": "ice_candidate_data",
+            "sdpMid": "0",
+            "sdpMLineIndex": 0
+          }
+        },
+        "receiver": {
+          "{timestamp}": {
+            "candidate": "ice_candidate_data", 
+            "sdpMid": "0",
+            "sdpMLineIndex": 0
+          }
+        }
+      },
+      "metadata": {
+        "created": 1640995200000,
+        "expires": 1640995500000,
+        "status": "waiting"
+      }
     }
   }
 }
 ```
 
-#### YAPFS Integration
+#### Firebase Security Rules
+```javascript
+{
+  "rules": {
+    "sessions": {
+      "$sessionId": {
+        // Allow read/write access to anyone with the session ID
+        ".read": true,
+        ".write": true,
+        
+        // Automatically delete sessions after 5 minutes
+        ".validate": "newData.child('metadata').child('expires').val() > now",
+        
+        // Validate session structure
+        "offer": {
+          ".validate": "newData.isString() && newData.val().length > 0"
+        },
+        "answer": {
+          ".validate": "newData.isString() && newData.val().length > 0"
+        },
+        "candidates": {
+          "$role": {
+            "$timestamp": {
+              ".validate": "newData.hasChildren(['candidate'])"
+            }
+          }
+        },
+        "metadata": {
+          ".validate": "newData.hasChildren(['created', 'expires'])"
+        }
+      }
+    }
+  }
+}
+```
+
+#### YAPFS Firebase Integration
 ```go
-type CloudflareSignaling struct {
-    WorkerURL string
-    Timeout   time.Duration
+import (
+    "context"
+    "encoding/json"
+    "fmt"
+    "time"
+    
+    firebase "firebase.google.com/go/v4"
+    "firebase.google.com/go/v4/db"
+    "google.golang.org/api/option"
+)
+
+type FirebaseSignaling struct {
+    client    *db.Client
+    sessionID string
+    timeout   time.Duration
 }
 
-func (c *CloudflareSignaling) PublishOffer(id string, offer *webrtc.SessionDescription) error {
-    // POST SDP offer to Cloudflare Worker
+type SessionData struct {
+    Offer      string                 `json:"offer,omitempty"`
+    Answer     string                 `json:"answer,omitempty"`
+    Candidates map[string]interface{} `json:"candidates,omitempty"`
+    Metadata   SessionMetadata        `json:"metadata"`
 }
 
-func (c *CloudflareSignaling) GetOffer(id string) (*webrtc.SessionDescription, error) {
-    // GET SDP offer from Cloudflare Worker
+type SessionMetadata struct {
+    Created int64  `json:"created"`
+    Expires int64  `json:"expires"`
+    Status  string `json:"status"`
 }
 
-func (c *CloudflareSignaling) PublishAnswer(id string, answer *webrtc.SessionDescription) error {
-    // POST SDP answer to Cloudflare Worker
+func NewFirebaseSignaling(projectID, databaseURL, sessionID string) (*FirebaseSignaling, error) {
+    ctx := context.Background()
+    
+    // Initialize Firebase app
+    conf := &firebase.Config{
+        DatabaseURL: databaseURL,
+        ProjectID:   projectID,
+    }
+    
+    app, err := firebase.NewApp(ctx, conf, option.WithCredentialsFile("path/to/serviceAccount.json"))
+    if err != nil {
+        return nil, fmt.Errorf("failed to initialize Firebase app: %w", err)
+    }
+    
+    // Get Realtime Database client
+    client, err := app.Database(ctx)
+    if err != nil {
+        return nil, fmt.Errorf("failed to initialize Firebase database: %w", err)
+    }
+    
+    return &FirebaseSignaling{
+        client:    client,
+        sessionID: sessionID,
+        timeout:   30 * time.Second,
+    }, nil
 }
 
-func (c *CloudflareSignaling) GetAnswer(id string) (*webrtc.SessionDescription, error) {
-    // GET SDP answer from Cloudflare Worker
+func (f *FirebaseSignaling) CreateSession(ctx context.Context) error {
+    ref := f.client.NewRef(fmt.Sprintf("sessions/%s", f.sessionID))
+    
+    sessionData := SessionData{
+        Metadata: SessionMetadata{
+            Created: time.Now().Unix(),
+            Expires: time.Now().Add(5 * time.Minute).Unix(),
+            Status:  "waiting",
+        },
+    }
+    
+    return ref.Set(ctx, sessionData)
+}
+
+func (f *FirebaseSignaling) PublishOffer(ctx context.Context, offer *webrtc.SessionDescription) error {
+    ref := f.client.NewRef(fmt.Sprintf("sessions/%s/offer", f.sessionID))
+    
+    // Encode SDP to base64
+    encodedOffer := base64.StdEncoding.EncodeToString([]byte(offer.SDP))
+    
+    return ref.Set(ctx, encodedOffer)
+}
+
+func (f *FirebaseSignaling) ListenForAnswer(ctx context.Context) (*webrtc.SessionDescription, error) {
+    ref := f.client.NewRef(fmt.Sprintf("sessions/%s/answer", f.sessionID))
+    
+    // Create channel for real-time updates
+    answerCh := make(chan string, 1)
+    errCh := make(chan error, 1)
+    
+    // Listen for answer updates
+    listener := ref.Listen(ctx, func(snapshot db.DataSnapshot) {
+        var answer string
+        if err := snapshot.Unmarshal(&answer); err != nil {
+            errCh <- err
+            return
+        }
+        
+        if answer != "" {
+            answerCh <- answer
+        }
+    })
+    defer listener.Close()
+    
+    // Wait for answer or timeout
+    select {
+    case answer := <-answerCh:
+        // Decode base64 SDP
+        decodedSDP, err := base64.StdEncoding.DecodeString(answer)
+        if err != nil {
+            return nil, fmt.Errorf("failed to decode answer SDP: %w", err)
+        }
+        
+        return &webrtc.SessionDescription{
+            Type: webrtc.SDPTypeAnswer,
+            SDP:  string(decodedSDP),
+        }, nil
+        
+    case err := <-errCh:
+        return nil, err
+        
+    case <-time.After(f.timeout):
+        return nil, fmt.Errorf("timeout waiting for answer")
+        
+    case <-ctx.Done():
+        return nil, ctx.Err()
+    }
+}
+
+func (f *FirebaseSignaling) PublishAnswer(ctx context.Context, answer *webrtc.SessionDescription) error {
+    ref := f.client.NewRef(fmt.Sprintf("sessions/%s/answer", f.sessionID))
+    
+    // Encode SDP to base64
+    encodedAnswer := base64.StdEncoding.EncodeToString([]byte(answer.SDP))
+    
+    return ref.Set(ctx, encodedAnswer)
+}
+
+func (f *FirebaseSignaling) ListenForOffer(ctx context.Context) (*webrtc.SessionDescription, error) {
+    ref := f.client.NewRef(fmt.Sprintf("sessions/%s/offer", f.sessionID))
+    
+    // Create channel for real-time updates
+    offerCh := make(chan string, 1)
+    errCh := make(chan error, 1)
+    
+    // Listen for offer updates
+    listener := ref.Listen(ctx, func(snapshot db.DataSnapshot) {
+        var offer string
+        if err := snapshot.Unmarshal(&offer); err != nil {
+            errCh <- err
+            return
+        }
+        
+        if offer != "" {
+            offerCh <- offer
+        }
+    })
+    defer listener.Close()
+    
+    // Wait for offer or timeout
+    select {
+    case offer := <-offerCh:
+        // Decode base64 SDP
+        decodedSDP, err := base64.StdEncoding.DecodeString(offer)
+        if err != nil {
+            return nil, fmt.Errorf("failed to decode offer SDP: %w", err)
+        }
+        
+        return &webrtc.SessionDescription{
+            Type: webrtc.SDPTypeOffer,
+            SDP:  string(decodedSDP),
+        }, nil
+        
+    case err := <-errCh:
+        return nil, err
+        
+    case <-time.After(f.timeout):
+        return nil, fmt.Errorf("timeout waiting for offer")
+        
+    case <-ctx.Done():
+        return nil, ctx.Err()
+    }
+}
+
+// Real-time ICE candidate exchange
+func (f *FirebaseSignaling) SetupTrickleICE(ctx context.Context, pc *webrtc.PeerConnection, role string) {
+    // Listen for incoming candidates
+    go f.listenForCandidates(ctx, pc, role)
+    
+    // Send outgoing candidates
+    pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+        if candidate == nil {
+            return
+        }
+        
+        f.publishCandidate(ctx, candidate, role)
+    })
+}
+
+func (f *FirebaseSignaling) listenForCandidates(ctx context.Context, pc *webrtc.PeerConnection, myRole string) {
+    // Listen to the other peer's candidates
+    otherRole := "receiver"
+    if myRole == "receiver" {
+        otherRole = "sender"
+    }
+    
+    ref := f.client.NewRef(fmt.Sprintf("sessions/%s/candidates/%s", f.sessionID, otherRole))
+    
+    listener := ref.Listen(ctx, func(snapshot db.DataSnapshot) {
+        var candidates map[string]interface{}
+        if err := snapshot.Unmarshal(&candidates); err != nil {
+            return
+        }
+        
+        for _, candidateData := range candidates {
+            if candidateMap, ok := candidateData.(map[string]interface{}); ok {
+                candidate := webrtc.ICECandidateInit{
+                    Candidate: candidateMap["candidate"].(string),
+                }
+                
+                if sdpMid, ok := candidateMap["sdpMid"].(string); ok {
+                    candidate.SDPMid = &sdpMid
+                }
+                
+                if sdpMLineIndex, ok := candidateMap["sdpMLineIndex"].(float64); ok {
+                    idx := uint16(sdpMLineIndex)
+                    candidate.SDPMLineIndex = &idx
+                }
+                
+                pc.AddICECandidate(candidate)
+            }
+        }
+    })
+    
+    // Clean up listener when context is done
+    go func() {
+        <-ctx.Done()
+        listener.Close()
+    }()
+}
+
+func (f *FirebaseSignaling) publishCandidate(ctx context.Context, candidate *webrtc.ICECandidate, role string) error {
+    ref := f.client.NewRef(fmt.Sprintf("sessions/%s/candidates/%s", f.sessionID, role))
+    
+    candidateData := map[string]interface{}{
+        "candidate": candidate.Candidate,
+        "sdpMid":    candidate.SDPMid,
+        "sdpMLineIndex": candidate.SDPMLineIndex,
+    }
+    
+    // Use timestamp as key for ordering
+    timestamp := fmt.Sprintf("%d", time.Now().UnixNano())
+    
+    return ref.Child(timestamp).Set(ctx, candidateData)
+}
+
+// Cleanup session after transfer
+func (f *FirebaseSignaling) CleanupSession(ctx context.Context) error {
+    ref := f.client.NewRef(fmt.Sprintf("sessions/%s", f.sessionID))
+    return ref.Delete(ctx)
+}
+```
+
+#### Configuration Integration
+```go
+type FirebaseConfig struct {
+    ProjectID     string `mapstructure:"project_id"`
+    DatabaseURL   string `mapstructure:"database_url"`
+    CredentialsPath string `mapstructure:"credentials_path"`
+    Timeout       time.Duration `mapstructure:"timeout"`
+}
+
+// Add to main config
+type Config struct {
+    // Existing fields...
+    Firebase FirebaseConfig `mapstructure:"firebase"`
+}
+```
+
+#### CLI Integration
+```go
+// Add to send command flags
+type SendFlags struct {
+    FilePath  string // Existing
+    SessionID string // New: --session flag
+    Firebase  bool   // New: --firebase flag
+}
+
+// Sender app integration
+func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
+    if opts.SessionID != "" {
+        // Use Firebase signaling
+        firebaseSignaling, err := transport.NewFirebaseSignaling(
+            s.config.Firebase.ProjectID,
+            s.config.Firebase.DatabaseURL,
+            opts.SessionID,
+        )
+        if err != nil {
+            return fmt.Errorf("failed to initialize Firebase signaling: %w", err)
+        }
+        
+        return s.runWithFirebaseSignaling(ctx, opts, firebaseSignaling)
+    }
+    
+    // Fall back to manual SDP exchange
+    return s.runWithManualSignaling(ctx, opts)
 }
 ```
 
 #### Usage Flow
 ```bash
-# Sender generates and shares a session ID
-./yapfs send --file /path/to/file --session abc123
+# Install and configure Firebase
+go get firebase.google.com/go/v4
+export GOOGLE_APPLICATION_CREDENTIALS="path/to/serviceAccount.json"
 
-# Receiver uses the same session ID
-./yapfs receive --dst /path/to/save --session abc123
+# Sender creates session and shares session ID
+./yapfs send --file /path/to/video.mp4 --session abc123 --firebase
+Session ID: abc123
+Share this session ID with the receiver
+Waiting for receiver to join...
+
+# Receiver joins using session ID
+./yapfs receive --dst ./downloads/ --session abc123 --firebase  
+Joined session: abc123
+Waiting for file transfer to begin...
+Connected! Receiving: video.mp4 (1.2GB)
+[=============>      ] 67.3% 823MB/1.2GB 15.2MB/s ETA: 26s
+
+# Alternative: Use configuration file
+./yapfs send --file video.mp4 --session abc123 --config firebase-config.yaml
+```
+
+#### Firebase Configuration File Example
+```yaml
+# ~/.yapfs.yaml or firebase-config.yaml
+firebase:
+  project_id: "yapfs-signaling"
+  database_url: "https://yapfs-signaling-default-rtdb.firebaseio.com/"
+  credentials_path: "/path/to/serviceAccount.json"
+  timeout: "30s"
+
+webrtc:
+  ice_servers:
+    - urls: ["stun:stun.l.google.com:19302"]
 ```
 
 #### Benefits
-- **Automated SDP exchange**: No manual copy/paste required
-- **Better UX**: Simple session ID sharing instead of large SDP blobs
-- **Programmatic usage**: Easy to integrate into scripts and automation
-- **Global availability**: Cloudflare's edge network for low latency
-- **Cost-effective**: Cloudflare Workers + KV are very affordable
-- **Ephemeral**: SDP data expires quickly (5 minutes) for security
+- **Real-time updates**: Firebase Realtime Database provides instant SDP and candidate exchange
+- **No server maintenance**: Managed service with automatic scaling and reliability
+- **Global CDN**: Firebase's global infrastructure ensures low latency worldwide
+- **Built-in security**: Firebase security rules control access and data validation
+- **Automatic cleanup**: TTL-based session expiration prevents data buildup
+- **Trickle ICE support**: Real-time candidate exchange for faster connection establishment
+- **Simple setup**: No custom server deployment required
+- **Free tier available**: Firebase offers generous free quotas for small usage
 
 #### Security Considerations
-- **Session ID entropy**: Use cryptographically secure random session IDs
-- **Rate limiting**: Implement rate limiting in Cloudflare Worker
-- **HTTPS only**: Ensure all communication uses HTTPS
-- **No sensitive data**: Only store ephemeral SDP data, never file content
+- **Session ID entropy**: Use cryptographically secure random session IDs (32+ characters)
+- **Firebase security rules**: Implement proper read/write rules and data validation
+- **Service account security**: Secure storage of Firebase service account credentials
+- **Data encryption**: SDP data is base64 encoded and automatically encrypted in transit
+- **Session expiration**: Automatic cleanup after 5 minutes prevents stale data
+- **No file content**: Only signaling data is stored, never actual file content
+- **Rate limiting**: Firebase provides built-in rate limiting and abuse protection
 
-#### Session Management and Real-time Communication
+#### Setup Instructions
 
-##### WebSocket vs HTTPS Approach
-
-**Option 1: WebSocket-based Session Management (Recommended for Trickle ICE)**
-```javascript
-// Cloudflare Worker with WebSocket support for real-time candidate exchange
-export default {
-  async fetch(request, env) {
-    const upgradeHeader = request.headers.get('Upgrade');
-    
-    if (upgradeHeader !== 'websocket') {
-      return handleHTTPRequest(request, env);
-    }
-    
-    // Handle WebSocket connection for real-time signaling
-    const [client, server] = Object.values(new WebSocketPair());
-    
-    server.addEventListener('message', async (event) => {
-      const data = JSON.parse(event.data);
-      
-      switch (data.type) {
-        case 'join-session':
-          await handleSessionJoin(data.sessionId, server, env);
-          break;
-        case 'offer':
-        case 'answer':
-        case 'ice-candidate':
-          await relayToOtherPeer(data, env);
-          break;
-      }
-    });
-    
-    server.accept();
-    return new Response(null, { status: 101, webSocket: client });
-  }
-};
-
-async function handleSessionJoin(sessionId, socket, env) {
-  // Store socket connection for session
-  await env.SESSIONS.put(`session:${sessionId}:socket`, socket);
-  
-  // Enable trickle ICE candidate exchange
-  socket.send(JSON.stringify({
-    type: 'session-ready',
-    trickleICE: true
-  }));
-}
-
-async function relayToOtherPeer(data, env) {
-  // Real-time relay of offers, answers, and ICE candidates
-  const otherPeerSocket = await env.SESSIONS.get(`session:${data.sessionId}:other`);
-  if (otherPeerSocket) {
-    otherPeerSocket.send(JSON.stringify(data));
-  }
-}
-```
-
-**YAPFS WebSocket Integration:**
-```go
-type WebSocketSignaling struct {
-    WorkerURL   string
-    SessionID   string
-    conn        *websocket.Conn
-    candidateCh chan *webrtc.ICECandidate
-    offerCh     chan *webrtc.SessionDescription
-    answerCh    chan *webrtc.SessionDescription
-}
-
-func (w *WebSocketSignaling) ConnectToSession(sessionID string) error {
-    wsURL := strings.Replace(w.WorkerURL, "https://", "wss://", 1)
-    conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-    if err != nil {
-        return fmt.Errorf("failed to connect to signaling server: %w", err)
-    }
-    
-    w.conn = conn
-    w.SessionID = sessionID
-    
-    // Join session
-    joinMsg := map[string]string{
-        "type": "join-session",
-        "sessionId": sessionID,
-    }
-    
-    return w.conn.WriteJSON(joinMsg)
-}
-
-func (w *WebSocketSignaling) SetupTrickleICE(pc *webrtc.PeerConnection) {
-    // Enable real-time ICE candidate exchange
-    pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-        if candidate == nil {
-            return // End of candidates
-        }
-        
-        // Send candidate immediately to other peer
-        candidateMsg := map[string]interface{}{
-            "type": "ice-candidate",
-            "sessionId": w.SessionID,
-            "candidate": candidate.ToJSON(),
-        }
-        
-        w.conn.WriteJSON(candidateMsg)
-    })
-    
-    // Listen for incoming candidates
-    go w.listenForCandidates(pc)
-}
-
-func (w *WebSocketSignaling) listenForCandidates(pc *webrtc.PeerConnection) {
-    for {
-        var msg map[string]interface{}
-        err := w.conn.ReadJSON(&msg)
-        if err != nil {
-            return
-        }
-        
-        if msg["type"] == "ice-candidate" {
-            candidateData := msg["candidate"].(map[string]interface{})
-            candidate := webrtc.ICECandidateInit{
-                Candidate: candidateData["candidate"].(string),
-                SDPMid:    candidateData["sdpMid"].(*string),
-                SDPMLineIndex: candidateData["sdpMLineIndex"].(*uint16),
-            }
-            
-            pc.AddICECandidate(candidate)
-        }
-    }
-}
-```
-
-**Option 2: HTTPS Polling-based Session Management (Simpler Implementation)**
-```javascript
-// Traditional HTTP-based approach with polling for session state
-export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-    const [, action, sessionId] = url.pathname.split('/');
-    
-    switch (action) {
-      case 'create-session':
-        return await createSession(sessionId, env);
-      case 'join-session':
-        return await joinSession(sessionId, env);
-      case 'offer':
-        return await handleOffer(sessionId, request, env);
-      case 'answer':
-        return await handleAnswer(sessionId, request, env);
-      case 'candidates':
-        return await handleCandidates(sessionId, request, env);
-      case 'poll':
-        return await pollSessionState(sessionId, env);
-    }
-  }
-};
-
-async function createSession(sessionId, env) {
-  const session = {
-    id: sessionId,
-    created: Date.now(),
-    participants: 0,
-    state: 'waiting'
-  };
-  
-  await env.SESSIONS_KV.put(`session:${sessionId}`, JSON.stringify(session), {
-    expirationTtl: 900 // 15 minutes
-  });
-  
-  return new Response(JSON.stringify({ success: true, sessionId }));
-}
-
-async function pollSessionState(sessionId, env) {
-  // Long polling for session updates
-  const session = await env.SESSIONS_KV.get(`session:${sessionId}`);
-  
-  if (!session) {
-    return new Response('Session not found', { status: 404 });
-  }
-  
-  return new Response(session, {
-    headers: { 'Content-Type': 'application/json' }
-  });
-}
-```
-
-**YAPFS HTTP Polling Integration:**
-```go
-type HTTPPollingSignaling struct {
-    WorkerURL string
-    SessionID string
-    pollInterval time.Duration
-}
-
-func (h *HTTPPollingSignaling) PollForUpdates(ctx context.Context) {
-    ticker := time.NewTicker(h.pollInterval)
-    defer ticker.Stop()
-    
-    for {
-        select {
-        case <-ctx.Done():
-            return
-        case <-ticker.C:
-            h.checkForUpdates()
-        }
-    }
-}
-
-func (h *HTTPPollingSignaling) checkForUpdates() {
-    resp, err := http.Get(fmt.Sprintf("%s/poll/%s", h.WorkerURL, h.SessionID))
-    if err != nil {
-        return
-    }
-    defer resp.Body.Close()
-    
-    var update SessionUpdate
-    json.NewDecoder(resp.Body).Decode(&update)
-    
-    // Process offers, answers, or candidates
-    h.processUpdate(update)
-}
-```
-
-##### Comparison: WebSocket vs HTTPS
-
-**WebSocket Advantages:**
-- **Real-time communication**: Immediate candidate exchange for optimal trickle ICE
-- **Lower latency**: No polling delays
-- **Efficient**: Single persistent connection
-- **Better for trickle ICE**: Natural fit for streaming candidate updates
-
-**HTTPS Polling Advantages:**
-- **Simpler implementation**: Standard HTTP requests
-- **Better reliability**: No connection state to manage
-- **Firewall friendly**: Works through most corporate firewalls
-- **Easier debugging**: Standard HTTP tools work
-
-**Recommended Approach:**
-- **Phase 1**: HTTPS polling for basic SDP exchange (simpler to implement)
-- **Phase 2**: WebSocket upgrade for trickle ICE support (performance optimization)
-
-##### Usage Examples
-
-**WebSocket-based Session:**
+##### 1. Firebase Project Setup
 ```bash
-# Sender creates and joins session with real-time signaling
-./yapfs send --file video.mp4 --session abc123 --signaling wss://worker.example.com
-
-# Receiver joins same session for instant candidate exchange
-./yapfs receive --dst ./downloads/ --session abc123 --signaling wss://worker.example.com
+# Create Firebase project
+# 1. Go to https://console.firebase.google.com/
+# 2. Create new project "yapfs-signaling"
+# 3. Enable Realtime Database
+# 4. Set database rules (see Security Rules section above)
+# 5. Generate service account key
 ```
 
-**HTTPS-based Session:**
+##### 2. Go Dependencies
 ```bash
-# Sender with HTTP polling (fallback mode)
-./yapfs send --file video.mp4 --session abc123 --signaling https://worker.example.com
+go get firebase.google.com/go/v4
+go get firebase.google.com/go/v4/db
+go get google.golang.org/api/option
+```
 
-# Receiver polls for updates
-./yapfs receive --dst ./downloads/ --session abc123 --signaling https://worker.example.com
+##### 3. Environment Setup
+```bash
+# Set service account credentials
+export GOOGLE_APPLICATION_CREDENTIALS="path/to/serviceAccount.json"
+
+# Or configure in YAPFS config file
+echo "firebase:
+  project_id: yapfs-signaling
+  database_url: https://yapfs-signaling-default-rtdb.firebaseio.com/
+  credentials_path: ./serviceAccount.json
+  timeout: 30s" > ~/.yapfs.yaml
 ```
 
 #### Implementation Priority
-1. **Phase 1**: Basic Cloudflare Worker + KV setup with HTTPS polling
-2. **Phase 2**: YAPFS integration with `--session` flag and HTTP signaling
-3. **Phase 3**: WebSocket upgrade for real-time trickle ICE support
-4. **Phase 4**: Enhanced security and rate limiting
-5. **Phase 5**: Optional: Web UI for even simpler session sharing
+
+##### Phase 1: Firebase Project Setup and Basic Integration (1-2 weeks)
+1. **Firebase project creation and configuration**
+   - Create Firebase project with Realtime Database
+   - Configure security rules for session management
+   - Generate and secure service account credentials
+
+2. **Go Firebase SDK integration**
+   - Add Firebase dependencies to go.mod
+   - Implement `FirebaseSignaling` service with basic SDP exchange
+   - Add Firebase configuration to YAPFS config system
+
+3. **CLI flag integration**
+   - Add `--session` and `--firebase` flags to send/receive commands
+   - Implement session ID generation and validation
+   - Add fallback to manual SDP exchange when Firebase is not configured
+
+##### Phase 2: Real-time ICE Candidate Exchange (1 week)
+1. **Trickle ICE implementation**
+   - Add real-time ICE candidate publishing and listening
+   - Implement proper candidate role separation (sender/receiver)
+   - Add timeout handling for candidate exchange
+
+2. **Connection optimization**
+   - Optimize connection establishment speed with trickle ICE
+   - Add connection state monitoring and error handling
+   - Implement proper session cleanup after transfers
+
+##### Phase 3: Enhanced Security and Error Handling (1 week)
+1. **Security improvements**
+   - Implement cryptographically secure session ID generation
+   - Add proper error handling for Firebase connection failures
+   - Implement session expiration and automatic cleanup
+
+2. **User experience enhancements**
+   - Add clear status messages for Firebase connection states
+   - Implement retry logic for temporary Firebase connectivity issues
+   - Add configuration validation and helpful error messages
+
+##### Phase 4: Advanced Features and Optimization (Optional)
+1. **Performance optimizations**
+   - Implement connection pooling for Firebase clients
+   - Add metrics and monitoring for Firebase usage
+   - Optimize data structures for minimal Firebase usage
+
+2. **Extended functionality**
+   - Add optional session metadata (file size, transfer speed estimates)
+   - Implement session discovery (list active sessions)
+   - Add optional web UI for session management
+
+#### Integration with Existing YAPFS Architecture
+
+The Firebase signaling integration follows YAPFS's existing service-oriented architecture:
+
+```go
+// Service instantiation in cmd/root.go
+func createServices() (...) {
+    // Existing services
+    peerService := transport.NewPeerService(cfg, stateHandler)
+    signalingService := transport.NewSignalingService()
+    
+    // New Firebase signaling service (optional)
+    var firebaseSignaling *transport.FirebaseSignaling
+    if cfg.Firebase.ProjectID != "" {
+        firebaseSignaling = transport.NewFirebaseSignaling(
+            cfg.Firebase.ProjectID,
+            cfg.Firebase.DatabaseURL,
+            sessionID,
+        )
+    }
+    
+    return peerService, signalingService, firebaseSignaling, consoleUI, dataChannelService
+}
+
+// App layer integration maintains separation of concerns
+func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
+    if opts.SessionID != "" && s.firebaseSignaling != nil {
+        return s.runWithFirebaseSignaling(ctx, opts)
+    }
+    return s.runWithManualSignaling(ctx, opts)
+}
+```
+
+This approach ensures:
+- **Zero breaking changes**: Existing manual SDP exchange remains default
+- **Progressive enhancement**: Firebase is opt-in via configuration
+- **Service isolation**: Firebase signaling is a separate service with clear interfaces
+- **Testability**: Services can be easily mocked and tested independently
 
 ## 5. WebRTC Connection Reliability
 
@@ -1110,7 +1325,7 @@ func (r *Receiver) HandleTimeouts(config TimeoutConfig) {
 ### Short Term (Next Release)
 - [ ] File integrity verification (checksums)
 - [ ] Basic path security and validation
-- [ ] Cloudflare Worker SDP exchange
+- [ ] Automated SDP exchange
 - [ ] Enhanced UI with progress bar and transfer statistics
 - [ ] WebRTC connection retry and reliability improvements
 

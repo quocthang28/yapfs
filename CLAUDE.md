@@ -408,10 +408,10 @@ A comprehensive roadmap of planned enhancements is documented in `FUTURE_IMPROVE
 ### Planned Features
 1. **File Data Integrity**: SHA-256 checksums, chunk verification, resume capability for interrupted transfers
 2. **Enhanced Security**: Peer authentication, application-layer encryption, path validation, directory traversal protection
-3. **Automated SDP Exchange**: Cloudflare Worker + KV integration for seamless session sharing without manual copy/paste
+3. **Automated SDP Exchange**: Server-based SDP exchange for seamless session sharing without manual copy/paste
 
 ### Implementation Priority
-- **Short term**: File integrity verification, basic security hardening, Cloudflare Worker SDP exchange
+- **Short term**: File integrity verification, basic security hardening, automated SDP exchange
 - **Medium term**: Resume capability, peer authentication mechanisms  
 - **Long term**: Advanced encryption, rate limiting, web UI
 
