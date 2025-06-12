@@ -28,7 +28,6 @@ type ProgressUpdate struct {
 type SenderChannels struct {
 	DataRequest  chan struct{}            // Transport requests data chunks
 	DataResponse chan processor.DataChunk // Processor provides data chunks
-	FlowControl  chan FlowControlEvent    // Bidirectional flow control
 	Progress     chan ProgressUpdate      // Progress reporting
 	Error        chan error               // Error propagation
 	Complete     chan struct{}            // Completion signaling
@@ -37,7 +36,6 @@ type SenderChannels struct {
 // ReceiverChannels defines communication channels for file receiving
 type ReceiverChannels struct {
 	DataReceived chan processor.DataChunk // Transport delivers received data
-	FlowControl  chan FlowControlEvent    // Flow control events
 	Progress     chan ProgressUpdate      // Progress reporting
 	Error        chan error               // Error propagation
 	Complete     chan struct{}            // Completion signaling
@@ -73,7 +71,6 @@ func (c *FileTransferCoordinator) CoordinateSender(ctx context.Context, peerConn
 	channels := &SenderChannels{
 		DataRequest:  make(chan struct{}, 1),
 		DataResponse: make(chan processor.DataChunk, 10), // Buffer for chunks
-		FlowControl:  make(chan FlowControlEvent, 1),
 		Progress:     make(chan ProgressUpdate, 1),
 		Error:        make(chan error, 1),
 		Complete:     make(chan struct{}),
@@ -108,7 +105,6 @@ func (c *FileTransferCoordinator) CoordinateReceiver(ctx context.Context, peerCo
 	// Create communication channels
 	channels := &ReceiverChannels{
 		DataReceived: make(chan processor.DataChunk, 10), // Buffer for received chunks
-		FlowControl:  make(chan FlowControlEvent, 1),
 		Progress:     make(chan ProgressUpdate, 1),
 		Error:        make(chan error, 1),
 		Complete:     make(chan struct{}),
@@ -183,13 +179,6 @@ func (c *FileTransferCoordinator) runSenderTransport(ctx context.Context, channe
 	startTime := time.Now()
 	lastProgressTime := startTime
 
-	// Start requesting data
-	select {
-	case channels.DataRequest <- struct{}{}:
-	case <-ctx.Done():
-		return
-	}
-
 	// Set up data channel handlers through the service
 	err = c.dataChannelSvc.SetupSenderChannelHandlers(channels, fileInfo.Size())
 	if err != nil {
@@ -242,10 +231,6 @@ func (c *FileTransferCoordinator) runSenderTransport(ctx context.Context, channe
 				default:
 				}
 			}
-
-		case flowEvent := <-channels.FlowControl:
-			// Handle flow control events
-			log.Printf("Flow control event: %s", flowEvent.Type)
 		}
 	}
 }

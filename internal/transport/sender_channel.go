@@ -137,19 +137,18 @@ func (s *SenderChannel) SetupChannelHandlers(channels *coordinator.SenderChannel
 		return fmt.Errorf("data channel not created, call CreateFileSenderDataChannel first")
 	}
 
-	// Set up flow control
-	s.dataChannel.SetBufferedAmountLowThreshold(s.config.WebRTC.BufferedAmountLowThreshold)
-	s.dataChannel.OnBufferedAmountLow(func() {
-		select {
-		case channels.FlowControl <- coordinator.FlowControlEvent{Type: "resume"}:
-		default:
-		}
-	})
-
 	// Set up open handler
 	s.dataChannel.OnOpen(func() {
 		log.Printf("File data channel opened: %s-%d. Starting file transfer, file size: %d bytes",
 			s.dataChannel.Label(), s.dataChannel.ID(), totalBytes)
+		
+		// Signal that we're ready to start sending data
+		select {
+		case channels.DataRequest <- struct{}{}:
+			log.Printf("Sent initial data request to coordinator")
+		default:
+			log.Printf("Failed to send initial data request - channel full")
+		}
 	})
 
 	return nil
