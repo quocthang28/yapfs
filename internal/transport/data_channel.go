@@ -23,13 +23,13 @@ func NewDataChannelService(cfg *config.Config) *DataChannelService {
 }
 
 // CreateFileSenderDataChannel creates a data channel configured for sending files
-func (d *DataChannelService) CreateFileSenderDataChannel(peerConn *webrtc.PeerConnection, label string) (*webrtc.DataChannel, error) {
+func (d *DataChannelService) CreateFileSenderDataChannel(peerConn *webrtc.PeerConnection, label string) error {
 	return d.sender.CreateFileSenderDataChannel(peerConn, label)
 }
 
-// SetupFileSender configures file sending for a data channel using prepared data processor
-func (d *DataChannelService) SetupFileSender(dataChannel *webrtc.DataChannel, dataProcessor *processor.DataProcessor) (<-chan struct{}, error) {
-	return d.sender.SetupFileSender(dataChannel, dataProcessor)
+// SetupFileSender configures file sending using prepared data processor
+func (d *DataChannelService) SetupFileSender(dataProcessor *processor.DataProcessor) (<-chan struct{}, error) {
+	return d.sender.SetupFileSender(dataProcessor)
 }
 
 // SetupFileReceiver sets up handlers for receiving files and returns a completion channel

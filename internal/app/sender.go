@@ -81,12 +81,12 @@ func (s *SenderApp) Run(opts *SenderOptions) error {
 	defer s.dataProcessor.Close()
 
 	// Create data channel for file transfer
-	dataChannel, err := s.dataChannelService.CreateFileSenderDataChannel(peerConn, "fileTransfer")
+	err = s.dataChannelService.CreateFileSenderDataChannel(peerConn, "fileTransfer")
 	if err != nil {
 		return fmt.Errorf("failed to create file sender data channel: %w", err)
 	}
 
-	doneCh, err := s.dataChannelService.SetupFileSender(dataChannel, s.dataProcessor)
+	doneCh, err := s.dataChannelService.SetupFileSender(s.dataProcessor)
 	if err != nil {
 		return fmt.Errorf("failed to setup file sender: %w", err)
 	}
@@ -97,7 +97,7 @@ func (s *SenderApp) Run(opts *SenderOptions) error {
 		return fmt.Errorf("failed to create offer: %w", err)
 	}
 
-	// Wait for ICE gathering to complete
+	// Wait for ICE gathering to complete // TODO: trickle ICE
 	s.ui.ShowMessage("Gathering ICE candidates...")
 	<-s.signalingService.WaitForICEGathering(peerConn)
 

@@ -12,7 +12,8 @@ import (
 
 // SenderChannel manages data channel operations for sending files
 type SenderChannel struct {
-	config *config.Config
+	config      *config.Config
+	dataChannel *webrtc.DataChannel
 }
 
 // NewSenderChannel creates a new data channel sender
@@ -22,8 +23,8 @@ func NewSenderChannel(cfg *config.Config) *SenderChannel {
 	}
 }
 
-// CreateFileSenderDataChannel creates a data channel configured for sending files
-func (s *SenderChannel) CreateFileSenderDataChannel(peerConn *webrtc.PeerConnection, label string) (*webrtc.DataChannel, error) {
+// CreateFileSenderDataChannel creates a data channel configured for sending files and stores it internally
+func (s *SenderChannel) CreateFileSenderDataChannel(peerConn *webrtc.PeerConnection, label string) error {
 	ordered := true //TODO: once data processor handle chunking this should be false
 
 	options := &webrtc.DataChannelInit{
@@ -32,19 +33,23 @@ func (s *SenderChannel) CreateFileSenderDataChannel(peerConn *webrtc.PeerConnect
 
 	dataChannel, err := peerConn.CreateDataChannel(label, options)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create file data channel: %w", err)
+		return fmt.Errorf("failed to create file data channel: %w", err)
 	}
 
-	return dataChannel, nil
+	s.dataChannel = dataChannel
+	return nil
 }
 
-// SetupFileSender configures file sending for a data channel using prepared data processor
-func (s *SenderChannel) SetupFileSender(dataChannel *webrtc.DataChannel, dataProcessor *processor.DataProcessor) (<-chan struct{}, error) {
+// SetupFileSender configures file sending using the internal data channel
+func (s *SenderChannel) SetupFileSender(dataProcessor *processor.DataProcessor) (<-chan struct{}, error) {
+	if s.dataChannel == nil {
+		return nil, fmt.Errorf("data channel not created, call CreateFileSenderDataChannel first")
+	}
 	sendMoreCh := make(chan struct{}, 1)
 	doneCh := make(chan struct{})
 
 	// OnOpen sets an event handler which is invoked when the underlying data transport has been established (or re-established).
-	dataChannel.OnOpen(func() {
+	s.dataChannel.OnOpen(func() {
 		fileInfo, err := dataProcessor.GetFileInfo()
 		if err != nil {
 			log.Printf("Error getting file info: %v", err)
@@ -53,7 +58,7 @@ func (s *SenderChannel) SetupFileSender(dataChannel *webrtc.DataChannel, dataPro
 		}
 		
 		log.Printf("File data channel opened: %s-%d. Starting file transfer, file size: %d bytes",
-			dataChannel.Label(), dataChannel.ID(), fileInfo.Size())
+			s.dataChannel.Label(), s.dataChannel.ID(), fileInfo.Size())
 
 		go func() {
 			var totalBytesSent uint64
@@ -79,7 +84,7 @@ func (s *SenderChannel) SetupFileSender(dataChannel *webrtc.DataChannel, dataPro
 
 					if chunk.EOF {
 						// Send EOF marker
-						err := dataChannel.Send([]byte("EOF"))
+						err := s.dataChannel.Send([]byte("EOF"))
 						if err != nil {
 							log.Printf("Error sending EOF: %v", err)
 						} else {
@@ -90,7 +95,7 @@ func (s *SenderChannel) SetupFileSender(dataChannel *webrtc.DataChannel, dataPro
 					}
 
 					// Send data chunk
-					err := dataChannel.Send(chunk.Data)
+					err := s.dataChannel.Send(chunk.Data)
 					if err != nil {
 						log.Printf("Error sending data: %v", err)
 						close(doneCh)
@@ -100,7 +105,7 @@ func (s *SenderChannel) SetupFileSender(dataChannel *webrtc.DataChannel, dataPro
 					totalBytesSent += uint64(len(chunk.Data))
 
 					// Flow control: wait if buffer is too full
-					if dataChannel.BufferedAmount() > s.config.WebRTC.MaxBufferedAmount {
+					if s.dataChannel.BufferedAmount() > s.config.WebRTC.MaxBufferedAmount {
 						<-sendMoreCh
 					}
 
@@ -114,8 +119,8 @@ func (s *SenderChannel) SetupFileSender(dataChannel *webrtc.DataChannel, dataPro
 	})
 
 	// Set up flow control
-	dataChannel.SetBufferedAmountLowThreshold(s.config.WebRTC.BufferedAmountLowThreshold)
-	dataChannel.OnBufferedAmountLow(func() {
+	s.dataChannel.SetBufferedAmountLowThreshold(s.config.WebRTC.BufferedAmountLowThreshold)
+	s.dataChannel.OnBufferedAmountLow(func() {
 		select {
 		case sendMoreCh <- struct{}{}:
 		default:

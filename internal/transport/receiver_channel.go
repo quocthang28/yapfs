@@ -11,7 +11,8 @@ import (
 
 // ReceiverChannel manages data channel operations for receiving files
 type ReceiverChannel struct {
-	config *config.Config
+	config      *config.Config
+	dataChannel *webrtc.DataChannel
 }
 
 // NewReceiverChannel creates a new data channel receiver
@@ -27,10 +28,11 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, dat
 
 	// OnDataChannel sets an event handler which is invoked when a data channel message arrives from a remote peer.
 	peerConn.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
-		log.Printf("Received data channel: %s-%d", dataChannel.Label(), dataChannel.ID())
+		r.dataChannel = dataChannel // Store the received data channel internally
+		log.Printf("Received data channel: %s-%d", r.dataChannel.Label(), r.dataChannel.ID())
 
-		dataChannel.OnOpen(func() {
-			log.Printf("File transfer data channel opened: %s-%d", dataChannel.Label(), dataChannel.ID())
+		r.dataChannel.OnOpen(func() {
+			log.Printf("File transfer data channel opened: %s-%d", r.dataChannel.Label(), r.dataChannel.ID())
 
 			// Prepare file for receiving using DataProcessor
 			err := dataProcessor.PrepareFileForReceiving(destPath)
@@ -43,7 +45,7 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, dat
 			log.Printf("Ready to receive file to: %s", destPath)
 		})
 
-		dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
+		r.dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
 			if string(msg.Data) == "EOF" {
 				// Finish receiving and get total bytes
 				totalBytes, err := dataProcessor.FinishReceiving()
@@ -65,13 +67,13 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, dat
 			}
 		})
 
-		dataChannel.OnClose(func() {
+		r.dataChannel.OnClose(func() {
 			log.Printf("File transfer data channel closed")
 			// Clean up any open files
 			dataProcessor.Close()
 		})
 
-		dataChannel.OnError(func(err error) {
+		r.dataChannel.OnError(func(err error) {
 			log.Printf("File transfer data channel error: %v", err)
 			// Clean up any open files
 			dataProcessor.Close()

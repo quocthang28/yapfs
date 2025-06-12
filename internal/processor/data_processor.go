@@ -11,7 +11,10 @@ import (
 // DataProcessor handles file operations, chunking, and reassembly for P2P file sharing
 // Future: Will include checksum validation and advanced data processing
 type DataProcessor struct {
+	// fileReader is used when this peer is the sender
 	fileReader *fileReader
+
+	// fileWriter is used when this peer is the receiver
 	fileWriter *fileWriter
 }
 
