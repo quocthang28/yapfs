@@ -54,6 +54,7 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, dat
 				} else {
 					log.Printf("File transfer complete: %d bytes received", totalBytes)
 				}
+
 				// Signal completion
 				close(doneCh)
 				return

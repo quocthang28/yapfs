@@ -90,6 +90,13 @@ func (s *SenderChannel) SetupFileSender(dataProcessor *processor.DataProcessor) 
 						} else {
 							log.Printf("File transfer complete: %d bytes sent", totalBytesSent)
 						}
+
+						// Close the channel after sending EOF
+						err = s.dataChannel.GracefulClose()
+						if err != nil {
+							log.Printf("Error closing channel: %v", err)
+						}
+
 						close(doneCh)
 						return
 					}
