@@ -1,0 +1,18 @@
+{
+  "webrtc": {
+    "ice_servers": [
+      {
+        "urls": ["stun:stun.l.google.com:19302", "stun:freestun.net:3478"]
+      }
+    ],
+    "buffered_amount_low_threshold": 524288,
+    "max_buffered_amount": 1048576,
+    "packet_size": 1024,
+    "throughput_report_interval_ms": 1000
+  },
+  "firebase": {
+    "project_id": "yapfs-4c839",
+    "database_url": "https://yapfs-4c839-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "credentials_path": "./yapfs-4c839-firebase-adminsdk-fbsvc-1a0c11f5ce.json"
+  }
+}
