@@ -56,7 +56,7 @@ func (s *SenderChannel) SetupFileSender(dataProcessor *processor.DataProcessor) 
 			close(doneCh)
 			return
 		}
-		
+
 		log.Printf("File data channel opened: %s-%d. Starting file transfer, file size: %d bytes",
 			s.dataChannel.Label(), s.dataChannel.ID(), fileInfo.Size())
 
@@ -64,7 +64,7 @@ func (s *SenderChannel) SetupFileSender(dataProcessor *processor.DataProcessor) 
 			var totalBytesSent uint64
 
 			// Start file transfer
-			dataCh, errCh := dataProcessor.StartFileTransfer(s.config.WebRTC.PacketSize)
+			dataCh, errCh := dataProcessor.StartReadingFile(s.config.WebRTC.PacketSize)
 			if dataCh == nil || errCh == nil {
 				log.Printf("No file prepared for transfer")
 				close(doneCh)

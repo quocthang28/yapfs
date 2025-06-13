@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 )
 
+// Data channel should be init and manage data processor internally, app layer doesn't need to know about it
 // DataProcessor handles file operations, chunking, and reassembly for P2P file sharing
 // Future: Will include checksum validation and advanced data processing
 type DataProcessor struct {
@@ -99,7 +100,7 @@ func (d *DataProcessor) PrepareFileForSending(filePath string) error {
 		return fmt.Errorf("failed to get file info: %w", err)
 	}
 
-	log.Printf("File prepared for sending: %s, size: %d bytes (%s)", 
+	log.Printf("File prepared for sending: %s, size: %d bytes (%s)",
 		filePath, stat.Size(), d.FormatFileSize(stat.Size()))
 
 	d.fileReader = &fileReader{
@@ -111,8 +112,8 @@ func (d *DataProcessor) PrepareFileForSending(filePath string) error {
 	return nil
 }
 
-// StartFileTransfer reads file chunks and sends them through the data channel
-func (d *DataProcessor) StartFileTransfer(chunkSize int) (<-chan DataChunk, <-chan error) {
+// StartReadingFile reads file chunks and sends them through the data channel
+func (d *DataProcessor) StartReadingFile(chunkSize int) (<-chan DataChunk, <-chan error) {
 	if d.fileReader == nil {
 		return nil, nil
 	}

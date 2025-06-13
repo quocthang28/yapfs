@@ -6,23 +6,34 @@ import (
 )
 
 var (
-	ErrInvalidBufferConfig   = errors.New("buffered amount low threshold must be less than max buffered amount")
-	ErrInvalidPacketSize     = errors.New("packet size must be greater than 0")
-	ErrInvalidReportInterval = errors.New("throughput report interval must be greater than 0")
+	ErrInvalidBufferConfig      = errors.New("buffered amount low threshold must be less than max buffered amount")
+	ErrInvalidPacketSize        = errors.New("packet size must be greater than 0")
+	ErrInvalidReportInterval    = errors.New("throughput report interval must be greater than 0")
+	ErrInvalidFirebaseConfig    = errors.New("Firebase credentials path must be set")
+	ErrInvalidFirebaseProjectID = errors.New("Firebase project ID must be set")
+	ErrInvalidFirebaseDatabaseURL = errors.New("Firebase database URL must be set")
 )
 
 // Config holds all application configuration
 type Config struct {
-	WebRTC WebRTCConfig `yaml:"webrtc"`
+	WebRTC   WebRTCConfig   `json:"webrtc"`
+	Firebase FirebaseConfig `json:"firebase"`
 }
 
 // WebRTCConfig holds WebRTC-specific configuration
 type WebRTCConfig struct {
-	ICEServers                 []webrtc.ICEServer `yaml:"ice_servers"`
-	BufferedAmountLowThreshold uint64             `yaml:"buffered_amount_low_threshold"`
-	MaxBufferedAmount          uint64             `yaml:"max_buffered_amount"`
-	PacketSize                 int                `yaml:"packet_size"`
-	ThroughputReportInterval   int                `yaml:"throughput_report_interval_ms"`
+	ICEServers                 []webrtc.ICEServer `json:"ice_servers"`
+	BufferedAmountLowThreshold uint64             `json:"buffered_amount_low_threshold"`
+	MaxBufferedAmount          uint64             `json:"max_buffered_amount"`
+	PacketSize                 int                `json:"packet_size"`
+	ThroughputReportInterval   int                `json:"throughput_report_interval_ms"`
+}
+
+// FirebaseConfig holds Firebase client configuration
+type FirebaseConfig struct {
+	ProjectID       string `json:"project_id"`
+	DatabaseURL     string `json:"database_url"`
+	CredentialsPath string `json:"credentials_path"`
 }
 
 // NewDefaultConfig returns a configuration with sensible defaults
@@ -39,6 +50,11 @@ func NewDefaultConfig() *Config {
 			PacketSize:                 1024,        // 1 KB packets
 			ThroughputReportInterval:   1000,        // 1 second
 		},
+		Firebase: FirebaseConfig{
+			ProjectID:       "",
+			DatabaseURL:     "",
+			CredentialsPath: "",
+		},
 	}
 }
 
@@ -52,6 +68,15 @@ func (c *Config) Validate() error {
 	}
 	if c.WebRTC.ThroughputReportInterval <= 0 {
 		return ErrInvalidReportInterval
+	}
+	if c.Firebase.CredentialsPath == "" {
+		return ErrInvalidFirebaseConfig
+	}
+	if c.Firebase.ProjectID == "" {
+		return ErrInvalidFirebaseProjectID
+	}
+	if c.Firebase.DatabaseURL == "" {
+		return ErrInvalidFirebaseDatabaseURL
 	}
 	return nil
 }

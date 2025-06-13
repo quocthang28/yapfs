@@ -6,6 +6,7 @@ import (
 
 	"yapfs/internal/config"
 	"yapfs/internal/processor"
+	"yapfs/internal/signalling"
 	"yapfs/internal/transport"
 	"yapfs/internal/ui"
 )
@@ -23,7 +24,7 @@ type SenderApp struct {
 	config             *config.Config
 	peerService        *transport.PeerService
 	dataChannelService *transport.DataChannelService
-	signalingService   *transport.SignalingService
+	signalingService   *signalling.SignalingService
 	ui                 *ui.ConsoleUI
 	dataProcessor      *processor.DataProcessor
 }
@@ -33,7 +34,7 @@ func NewSenderApp(
 	cfg *config.Config,
 	peerService *transport.PeerService,
 	dataChannelService *transport.DataChannelService,
-	signalingService *transport.SignalingService,
+	signalingService *signalling.SignalingService,
 	ui *ui.ConsoleUI,
 	dataProcessor *processor.DataProcessor,
 ) *SenderApp {
@@ -73,7 +74,13 @@ func (s *SenderApp) Run(opts *SenderOptions) error {
 	// Setup connection state handler
 	s.peerService.SetupConnectionStateHandler(peerConn, "sender")
 
-	// Prepare file for sending using DataProcessor
+	// Start signalling process
+	err = s.signalingService.StartSenderSignallingProcess(peerConn)
+	if err != nil {
+		return fmt.Errorf("failed during signalling process: %w", err)
+	}
+
+	// Prepare file for sending using DataProcessor //TODO: data processor to be handled internally by data channel service
 	err = s.dataProcessor.PrepareFileForSending(opts.FilePath)
 	if err != nil {
 		return fmt.Errorf("failed to prepare file for sending: %w", err)
@@ -91,55 +98,55 @@ func (s *SenderApp) Run(opts *SenderOptions) error {
 		return fmt.Errorf("failed to setup file sender: %w", err)
 	}
 
-	// Create offer
-	_, err = s.signalingService.CreateOffer(peerConn)
-	if err != nil {
-		return fmt.Errorf("failed to create offer: %w", err)
-	}
+	// // Create offer
+	// _, err = s.signalingService.CreateOffer(peerConn)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to create offer: %w", err)
+	// }
 
-	// Wait for ICE gathering to complete // TODO: trickle ICE
-	s.ui.ShowMessage("Gathering ICE candidates...")
-	<-s.signalingService.WaitForICEGathering(peerConn)
+	// // Wait for ICE gathering to complete // TODO: trickle ICE
+	// s.ui.ShowMessage("Gathering ICE candidates...")
+	// <-s.signalingService.WaitForICEGathering(peerConn)
 
-	// Get the final offer with ICE candidates
-	finalOffer := peerConn.LocalDescription()
-	if finalOffer == nil {
-		return fmt.Errorf("local description is nil after ICE gathering")
-	}
+	// // Get the final offer with ICE candidates
+	// finalOffer := peerConn.LocalDescription()
+	// if finalOffer == nil {
+	// 	return fmt.Errorf("local description is nil after ICE gathering")
+	// }
 
-	// Encode and display offer SDP for user to copy
-	encodedOffer, err := s.signalingService.EncodeSessionDescription(*finalOffer)
-	if err != nil {
-		return fmt.Errorf("failed to encode offer SDP: %w", err)
-	}
+	// // Encode and display offer SDP for user to copy
+	// encodedOffer, err := utils.EncodeSessionDescription(*finalOffer)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to encode offer SDP: %w", err)
+	// }
 
-	err = s.ui.OutputSDP(encodedOffer, "Offer")
-	if err != nil {
-		return fmt.Errorf("failed to output offer SDP: %w", err)
-	}
+	// err = s.ui.OutputSDP(encodedOffer, "Offer")
+	// if err != nil {
+	// 	return fmt.Errorf("failed to output offer SDP: %w", err)
+	// }
 
-	// Wait for answer SDP from user
-	answer, err := s.ui.InputSDP("Answer")
-	if err != nil {
-		return fmt.Errorf("failed to get answer SDP: %w", err)
-	}
+	// // Wait for answer SDP from user
+	// answer, err := s.ui.InputSDP("Answer")
+	// if err != nil {
+	// 	return fmt.Errorf("failed to get answer SDP: %w", err)
+	// }
 
-	// Decode and set remote description
-	answerSD, err := s.signalingService.DecodeSessionDescription(answer)
-	if err != nil {
-		return fmt.Errorf("failed to decode answer SDP: %w", err)
-	}
+	// // Decode and set remote description
+	// answerSD, err := utils.DecodeSessionDescription(answer)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to decode answer SDP: %w", err)
+	// }
 
-	err = s.signalingService.SetRemoteDescription(peerConn, answerSD)
-	if err != nil {
-		return fmt.Errorf("failed to set remote description: %w", err)
-	}
+	// err = s.signalingService.SetRemoteDescription(peerConn, answerSD)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to set remote description: %w", err)
+	// }
 
 	// Show ready message
 	s.ui.ShowMessage("Sender is ready. File will start sending when the data channel opens.")
 
 	// Wait for transfer completion
 	<-doneCh
-	s.ui.ShowMessage("File transfer completed successfully")
+	s.ui.ShowMessage("File transfer completed successfully!")
 	return nil
 }
