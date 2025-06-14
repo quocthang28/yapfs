@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -49,7 +50,7 @@ func NewSenderApp(
 }
 
 // Run starts the sender application with the given options
-func (s *SenderApp) Run(opts *SenderOptions) error {
+func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	// Validate required options
 	if opts.FilePath == "" {
 		return fmt.Errorf("file path is required")
@@ -75,7 +76,7 @@ func (s *SenderApp) Run(opts *SenderOptions) error {
 	s.peerService.SetupConnectionStateHandler(peerConn, "sender")
 
 	// Start signalling process
-	err = s.signalingService.StartSenderSignallingProcess(peerConn)
+	err = s.signalingService.StartSenderSignallingProcess(ctx, peerConn)
 	if err != nil {
 		return fmt.Errorf("failed during signalling process: %w", err)
 	}
@@ -93,7 +94,7 @@ func (s *SenderApp) Run(opts *SenderOptions) error {
 		return fmt.Errorf("failed to create file sender data channel: %w", err)
 	}
 
-	doneCh, err := s.dataChannelService.SetupFileSender(s.dataProcessor)
+	doneCh, err := s.dataChannelService.SetupFileSender(ctx, s.dataProcessor)
 	if err != nil {
 		return fmt.Errorf("failed to setup file sender: %w", err)
 	}

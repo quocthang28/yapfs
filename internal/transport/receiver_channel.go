@@ -2,6 +2,7 @@ package transport
 
 import (
 	"log"
+	"sync"
 
 	"yapfs/internal/config"
 	"yapfs/internal/processor"
@@ -25,6 +26,7 @@ func NewReceiverChannel(cfg *config.Config) *ReceiverChannel {
 // SetupFileReceiver sets up handlers for receiving files and returns a completion channel
 func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, dataProcessor *processor.DataProcessor, destPath string) (<-chan struct{}, error) {
 	doneCh := make(chan struct{})
+	var doneOnce sync.Once // Ensure doneCh is closed only once
 
 	// OnDataChannel sets an event handler which is invoked when a data channel message arrives from a remote peer.
 	peerConn.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
@@ -38,7 +40,7 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, dat
 			err := dataProcessor.PrepareFileForReceiving(destPath)
 			if err != nil {
 				log.Printf("Error preparing file for receiving: %v", err)
-				close(doneCh)
+				doneOnce.Do(func() { close(doneCh) })
 				return
 			}
 
@@ -56,7 +58,7 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, dat
 				}
 
 				// Signal completion
-				close(doneCh)
+				doneOnce.Do(func() { close(doneCh) })
 				return
 			}
 

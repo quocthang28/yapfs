@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"yapfs/internal/app"
@@ -90,5 +91,6 @@ func runSenderApp(flags *SendFlags) error {
 	}
 
 	senderApp := app.NewSenderApp(cfg, peerService, dataChannelService, signalingService, ui, dataProcessor)
-	return senderApp.Run(opts)
+	ctx := context.Background()
+	return senderApp.Run(ctx, opts)
 }

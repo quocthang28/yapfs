@@ -1,6 +1,8 @@
 package transport
 
 import (
+	"context"
+
 	"yapfs/internal/config"
 	"yapfs/internal/processor"
 
@@ -28,8 +30,8 @@ func (d *DataChannelService) CreateFileSenderDataChannel(peerConn *webrtc.PeerCo
 }
 
 // SetupFileSender configures file sending using prepared data processor
-func (d *DataChannelService) SetupFileSender(dataProcessor *processor.DataProcessor) (<-chan struct{}, error) {
-	return d.sender.SetupFileSender(dataProcessor)
+func (d *DataChannelService) SetupFileSender(ctx context.Context, dataProcessor *processor.DataProcessor) (<-chan struct{}, error) {
+	return d.sender.SetupFileSender(ctx, dataProcessor)
 }
 
 // SetupFileReceiver sets up handlers for receiving files and returns a completion channel

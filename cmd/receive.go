@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -125,5 +126,6 @@ func runReceiverApp(flags *ReceiveFlags) error {
 	}
 
 	receiverApp := app.NewReceiverApp(cfg, peerService, dataChannelService, signalingService, ui, dataProcessor)
-	return receiverApp.Run(opts)
+	ctx := context.Background()
+	return receiverApp.Run(ctx, opts)
 }

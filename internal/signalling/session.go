@@ -1,6 +1,7 @@
 package signalling
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"time"
@@ -77,7 +78,7 @@ func (s *SessionService) UpdateAnswer(sessionID, answer string) error {
 	return nil
 }
 
-func (s *SessionService) CheckForAnswer(sessionID string) (<-chan string, <-chan error) {
+func (s *SessionService) CheckForAnswer(ctx context.Context, sessionID string) (<-chan string, <-chan error) {
 	answerChan := make(chan string, 1)
 	errorChan := make(chan error, 1)
 
@@ -92,7 +93,13 @@ func (s *SessionService) CheckForAnswer(sessionID string) (<-chan string, <-chan
 			// The other peer might not answer immediately so
 			// we will wait a bit before checking for first time
 			if firstCheck {
-				time.Sleep(time.Second * 2)
+				select {
+				case <-time.After(time.Second * 2):
+					// Continue with first check
+				case <-ctx.Done():
+					errorChan <- ctx.Err()
+					return
+				}
 				firstCheck = false
 			}
 
@@ -115,7 +122,13 @@ func (s *SessionService) CheckForAnswer(sessionID string) (<-chan string, <-chan
 
 			if numOfCheck > 0 {
 				// Wait 5 seconds before checking again for answer
-				time.Sleep(time.Second * 5)
+				select {
+				case <-time.After(time.Second * 5):
+					// Continue polling
+				case <-ctx.Done():
+					errorChan <- ctx.Err()
+					return
+				}
 			}
 		}
 

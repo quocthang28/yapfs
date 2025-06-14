@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 
 	"yapfs/internal/config"
@@ -48,7 +49,7 @@ func NewReceiverApp(
 }
 
 // Run starts the receiver application with the given options
-func (r *ReceiverApp) Run(opts *ReceiverOptions) error {
+func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	// Validate required options
 	if opts.DestPath == "" {
 		return fmt.Errorf("destination path is required")
@@ -80,7 +81,7 @@ func (r *ReceiverApp) Run(opts *ReceiverOptions) error {
 	}
 
 	// Start signalling process
-	err = r.signalingService.StartReceiverSignallingProcess(peerConn, code)
+	err = r.signalingService.StartReceiverSignallingProcess(ctx, peerConn, code)
 	if err != nil {
 		return fmt.Errorf("failed during signalling process: %w", err)
 	}

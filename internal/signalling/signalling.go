@@ -34,7 +34,7 @@ func NewSignalingService(cfg *config.Config) *SignalingService {
 }
 
 // StartSenderSignallingProcess orchestrates the complete sender signaling flow
-func (s *SignalingService) StartSenderSignallingProcess(peerConn *webrtc.PeerConnection) error {
+func (s *SignalingService) StartSenderSignallingProcess(ctx context.Context, peerConn *webrtc.PeerConnection) error {
 	// Create offer
 	_, err := s.CreateOffer(peerConn)
 	if err != nil {
@@ -62,12 +62,11 @@ func (s *SignalingService) StartSenderSignallingProcess(peerConn *webrtc.PeerCon
 		return fmt.Errorf("failed to create session with offer: %w", err)
 	}
 
-	// TODO: return this to UI
 	fmt.Printf("Session created with ID: %s\n", sessionID)
 
 	// Wait for answer from remote peer
 	fmt.Printf("Waiting for receiver to answer...")
-	answerChan, errorChan := s.sessionService.CheckForAnswer(sessionID)
+	answerChan, errorChan := s.sessionService.CheckForAnswer(ctx, sessionID)
 	var answer string
 
 answerLoop:
@@ -96,7 +95,7 @@ answerLoop:
 }
 
 // StartReceiverSignallingProcess orchestrates the complete receiver signaling flow
-func (s *SignalingService) StartReceiverSignallingProcess(peerConn *webrtc.PeerConnection, sessionID string) error {
+func (s *SignalingService) StartReceiverSignallingProcess(ctx context.Context, peerConn *webrtc.PeerConnection, sessionID string) error {
 	// Get the offer from the session
 	encodedOffer, err := s.sessionService.GetOffer(sessionID)
 	if err != nil {

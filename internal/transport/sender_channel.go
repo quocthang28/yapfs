@@ -1,8 +1,11 @@
 package transport
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"sync"
+	"time"
 
 	"yapfs/internal/config"
 	"yapfs/internal/processor"
@@ -41,19 +44,20 @@ func (s *SenderChannel) CreateFileSenderDataChannel(peerConn *webrtc.PeerConnect
 }
 
 // SetupFileSender configures file sending using the internal data channel
-func (s *SenderChannel) SetupFileSender(dataProcessor *processor.DataProcessor) (<-chan struct{}, error) {
+func (s *SenderChannel) SetupFileSender(ctx context.Context, dataProcessor *processor.DataProcessor) (<-chan struct{}, error) {
 	if s.dataChannel == nil {
 		return nil, fmt.Errorf("data channel not created, call CreateFileSenderDataChannel first")
 	}
-	sendMoreCh := make(chan struct{}, 1)
+	sendMoreCh := make(chan struct{}, 3) // Buffer size 3 to handle multiple low threshold events
 	doneCh := make(chan struct{})
+	var doneOnce sync.Once // Ensure doneCh is closed only once
 
 	// OnOpen sets an event handler which is invoked when the underlying data transport has been established (or re-established).
 	s.dataChannel.OnOpen(func() {
 		fileInfo, err := dataProcessor.GetFileInfo()
 		if err != nil {
 			log.Printf("Error getting file info: %v", err)
-			close(doneCh)
+			doneOnce.Do(func() { close(doneCh) })
 			return
 		}
 
@@ -67,7 +71,7 @@ func (s *SenderChannel) SetupFileSender(dataProcessor *processor.DataProcessor) 
 			dataCh, errCh := dataProcessor.StartReadingFile(s.config.WebRTC.PacketSize)
 			if dataCh == nil || errCh == nil {
 				log.Printf("No file prepared for transfer")
-				close(doneCh)
+				doneOnce.Do(func() { close(doneCh) })
 				return
 			}
 
@@ -78,7 +82,7 @@ func (s *SenderChannel) SetupFileSender(dataProcessor *processor.DataProcessor) 
 					if !ok {
 						// Channel closed unexpectedly
 						log.Printf("Data channel closed unexpectedly")
-						close(doneCh)
+						doneOnce.Do(func() { close(doneCh) })
 						return
 					}
 
@@ -97,7 +101,7 @@ func (s *SenderChannel) SetupFileSender(dataProcessor *processor.DataProcessor) 
 							log.Printf("Error closing channel: %v", err)
 						}
 
-						close(doneCh)
+						doneOnce.Do(func() { close(doneCh) })
 						return
 					}
 
@@ -105,7 +109,7 @@ func (s *SenderChannel) SetupFileSender(dataProcessor *processor.DataProcessor) 
 					err := s.dataChannel.Send(chunk.Data)
 					if err != nil {
 						log.Printf("Error sending data: %v", err)
-						close(doneCh)
+						doneOnce.Do(func() { close(doneCh) })
 						return
 					}
 
@@ -113,12 +117,27 @@ func (s *SenderChannel) SetupFileSender(dataProcessor *processor.DataProcessor) 
 
 					// Flow control: wait if buffer is too full
 					if s.dataChannel.BufferedAmount() > s.config.WebRTC.MaxBufferedAmount {
-						<-sendMoreCh
+						select {
+						case <-sendMoreCh:
+							// Buffer drained, continue sending
+						case <-ctx.Done():
+							log.Printf("File transfer cancelled: %v", ctx.Err())
+							doneOnce.Do(func() { close(doneCh) })
+							return
+						case <-time.After(30 * time.Second):
+							log.Printf("Flow control timeout - WebRTC channel may be dead")
+							doneOnce.Do(func() { close(doneCh) })
+							return
+						}
 					}
 
 				case err := <-errCh:
 					log.Printf("Error during file transfer: %v", err)
-					close(doneCh)
+					doneOnce.Do(func() { close(doneCh) })
+					return
+				case <-ctx.Done():
+					log.Printf("File transfer cancelled: %v", ctx.Err())
+					doneOnce.Do(func() { close(doneCh) })
 					return
 				}
 			}
@@ -128,9 +147,14 @@ func (s *SenderChannel) SetupFileSender(dataProcessor *processor.DataProcessor) 
 	// Set up flow control
 	s.dataChannel.SetBufferedAmountLowThreshold(s.config.WebRTC.BufferedAmountLowThreshold)
 	s.dataChannel.OnBufferedAmountLow(func() {
+		// Use non-blocking send with increased buffer to reduce dropped signals
+		// If buffer is full, it means we already have pending signals
 		select {
 		case sendMoreCh <- struct{}{}:
+			// Signal sent successfully
 		default:
+			// Buffer full - signal already pending, no need to add more
+			log.Printf("Flow control: signal already pending, skipping")
 		}
 	})
 
