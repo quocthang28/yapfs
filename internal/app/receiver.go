@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"yapfs/internal/config"
-	"yapfs/internal/processor"
 	"yapfs/internal/signalling"
 	"yapfs/internal/transport"
 	"yapfs/internal/ui"
@@ -26,7 +25,6 @@ type ReceiverApp struct {
 	dataChannelService *transport.DataChannelService
 	signalingService   *signalling.SignalingService
 	ui                 *ui.ConsoleUI
-	dataProcessor      *processor.DataProcessor
 }
 
 // NewReceiverApp creates a new receiver application
@@ -36,7 +34,6 @@ func NewReceiverApp(
 	dataChannelService *transport.DataChannelService,
 	signalingService *signalling.SignalingService,
 	ui *ui.ConsoleUI,
-	dataProcessor *processor.DataProcessor,
 ) *ReceiverApp {
 	return &ReceiverApp{
 		config:             cfg,
@@ -44,7 +41,6 @@ func NewReceiverApp(
 		dataChannelService: dataChannelService,
 		signalingService:   signalingService,
 		ui:                 ui,
-		dataProcessor:      dataProcessor,
 	}
 }
 
@@ -57,8 +53,7 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 
 	r.ui.ShowMessage(fmt.Sprintf("Preparing to receive file to: %s", opts.DestPath))
 
-	// Ensure DataProcessor cleanup
-	defer r.dataProcessor.Close()
+	// Data processor is now handled internally by the data channel service
 
 	// Create peer connection
 	peerConn, err := r.peerService.CreatePeerConnection()
@@ -68,6 +63,9 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	defer func() {
 		if err := r.peerService.Close(peerConn); err != nil {
 			r.ui.ShowMessage(fmt.Sprintf("Error closing peer connection: %v", err))
+		}
+		if err := r.dataChannelService.Close(); err != nil {
+			r.ui.ShowMessage(fmt.Sprintf("Error closing data channel service: %v", err))
 		}
 	}()
 
@@ -87,7 +85,7 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	}
 
 	// Setup file receiver
-	doneCh, err := r.dataChannelService.SetupFileReceiver(peerConn, r.dataProcessor, opts.DestPath)
+	doneCh, err := r.dataChannelService.SetupFileReceiver(peerConn, opts.DestPath)
 	if err != nil {
 		return fmt.Errorf("failed to setup file receiver data channel handler: %w", err)
 	}

@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"yapfs/internal/config"
-	"yapfs/internal/processor"
 	"yapfs/internal/signalling"
 	"yapfs/internal/transport"
 	"yapfs/internal/ui"
@@ -27,7 +26,6 @@ type SenderApp struct {
 	dataChannelService *transport.DataChannelService
 	signalingService   *signalling.SignalingService
 	ui                 *ui.ConsoleUI
-	dataProcessor      *processor.DataProcessor
 }
 
 // NewSenderApp creates a new sender application
@@ -37,7 +35,6 @@ func NewSenderApp(
 	dataChannelService *transport.DataChannelService,
 	signalingService *signalling.SignalingService,
 	ui *ui.ConsoleUI,
-	dataProcessor *processor.DataProcessor,
 ) *SenderApp {
 	return &SenderApp{
 		config:             cfg,
@@ -45,7 +42,6 @@ func NewSenderApp(
 		dataChannelService: dataChannelService,
 		signalingService:   signalingService,
 		ui:                 ui,
-		dataProcessor:      dataProcessor,
 	}
 }
 
@@ -70,6 +66,9 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 		if err := s.peerService.Close(peerConn); err != nil {
 			s.ui.ShowMessage(fmt.Sprintf("Error closing peer connection: %v", err))
 		}
+		if err := s.dataChannelService.Close(); err != nil {
+			s.ui.ShowMessage(fmt.Sprintf("Error closing data channel service: %v", err))
+		}
 	}()
 
 	// Setup connection state handler
@@ -81,67 +80,16 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 		return fmt.Errorf("failed during signalling process: %w", err)
 	}
 
-	// Prepare file for sending using DataProcessor //TODO: data processor to be handled internally by data channel service
-	err = s.dataProcessor.PrepareFileForSending(opts.FilePath)
-	if err != nil {
-		return fmt.Errorf("failed to prepare file for sending: %w", err)
-	}
-	defer s.dataProcessor.Close()
-
 	// Create data channel for file transfer
 	err = s.dataChannelService.CreateFileSenderDataChannel(peerConn, "fileTransfer")
 	if err != nil {
 		return fmt.Errorf("failed to create file sender data channel: %w", err)
 	}
 
-	doneCh, err := s.dataChannelService.SetupFileSender(ctx, s.dataProcessor)
+	doneCh, err := s.dataChannelService.SetupFileSender(ctx, opts.FilePath)
 	if err != nil {
 		return fmt.Errorf("failed to setup file sender: %w", err)
 	}
-
-	// // Create offer
-	// _, err = s.signalingService.CreateOffer(peerConn)
-	// if err != nil {
-	// 	return fmt.Errorf("failed to create offer: %w", err)
-	// }
-
-	// // Wait for ICE gathering to complete // TODO: trickle ICE
-	// s.ui.ShowMessage("Gathering ICE candidates...")
-	// <-s.signalingService.WaitForICEGathering(peerConn)
-
-	// // Get the final offer with ICE candidates
-	// finalOffer := peerConn.LocalDescription()
-	// if finalOffer == nil {
-	// 	return fmt.Errorf("local description is nil after ICE gathering")
-	// }
-
-	// // Encode and display offer SDP for user to copy
-	// encodedOffer, err := utils.EncodeSessionDescription(*finalOffer)
-	// if err != nil {
-	// 	return fmt.Errorf("failed to encode offer SDP: %w", err)
-	// }
-
-	// err = s.ui.OutputSDP(encodedOffer, "Offer")
-	// if err != nil {
-	// 	return fmt.Errorf("failed to output offer SDP: %w", err)
-	// }
-
-	// // Wait for answer SDP from user
-	// answer, err := s.ui.InputSDP("Answer")
-	// if err != nil {
-	// 	return fmt.Errorf("failed to get answer SDP: %w", err)
-	// }
-
-	// // Decode and set remote description
-	// answerSD, err := utils.DecodeSessionDescription(answer)
-	// if err != nil {
-	// 	return fmt.Errorf("failed to decode answer SDP: %w", err)
-	// }
-
-	// err = s.signalingService.SetRemoteDescription(peerConn, answerSD)
-	// if err != nil {
-	// 	return fmt.Errorf("failed to set remote description: %w", err)
-	// }
 
 	// Show ready message
 	s.ui.ShowMessage("Sender is ready. File will start sending when the data channel opens.")

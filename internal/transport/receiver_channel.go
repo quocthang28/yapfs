@@ -12,19 +12,21 @@ import (
 
 // ReceiverChannel manages data channel operations for receiving files
 type ReceiverChannel struct {
-	config      *config.Config
-	dataChannel *webrtc.DataChannel
+	config        *config.Config
+	dataChannel   *webrtc.DataChannel
+	dataProcessor *processor.DataProcessor
 }
 
 // NewReceiverChannel creates a new data channel receiver
 func NewReceiverChannel(cfg *config.Config) *ReceiverChannel {
 	return &ReceiverChannel{
-		config: cfg,
+		config:        cfg,
+		dataProcessor: processor.NewDataProcessor(),
 	}
 }
 
 // SetupFileReceiver sets up handlers for receiving files and returns a completion channel
-func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, dataProcessor *processor.DataProcessor, destPath string) (<-chan struct{}, error) {
+func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, destPath string) (<-chan struct{}, error) {
 	doneCh := make(chan struct{})
 	var doneOnce sync.Once // Ensure doneCh is closed only once
 
@@ -37,7 +39,7 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, dat
 			log.Printf("File transfer data channel opened: %s-%d", r.dataChannel.Label(), r.dataChannel.ID())
 
 			// Prepare file for receiving using DataProcessor
-			err := dataProcessor.PrepareFileForReceiving(destPath)
+			err := r.dataProcessor.PrepareFileForReceiving(destPath)
 			if err != nil {
 				log.Printf("Error preparing file for receiving: %v", err)
 				doneOnce.Do(func() { close(doneCh) })
@@ -50,7 +52,7 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, dat
 		r.dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
 			if string(msg.Data) == "EOF" {
 				// Finish receiving and get total bytes
-				totalBytes, err := dataProcessor.FinishReceiving()
+				totalBytes, err := r.dataProcessor.FinishReceiving()
 				if err != nil {
 					log.Printf("Error finishing file reception: %v", err)
 				} else {
@@ -63,7 +65,7 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, dat
 			}
 
 			// Write data using DataProcessor
-			err := dataProcessor.WriteData(msg.Data)
+			err := r.dataProcessor.WriteData(msg.Data)
 			if err != nil {
 				log.Printf("Error writing data: %v", err)
 				return
@@ -73,15 +75,23 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, dat
 		r.dataChannel.OnClose(func() {
 			log.Printf("File transfer data channel closed")
 			// Clean up any open files
-			dataProcessor.Close()
+			r.dataProcessor.Close()
 		})
 
 		r.dataChannel.OnError(func(err error) {
 			log.Printf("File transfer data channel error: %v", err)
 			// Clean up any open files
-			dataProcessor.Close()
+			r.dataProcessor.Close()
 		})
 	})
 
 	return doneCh, nil
+}
+
+// Close cleans up the ReceiverChannel resources
+func (r *ReceiverChannel) Close() error {
+	if r.dataProcessor != nil {
+		return r.dataProcessor.Close()
+	}
+	return nil
 }

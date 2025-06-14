@@ -78,70 +78,42 @@ func (s *SessionService) UpdateAnswer(sessionID, answer string) error {
 	return nil
 }
 
-func (s *SessionService) CheckForAnswer(ctx context.Context, sessionID string) (<-chan string, <-chan error) {
-	answerChan := make(chan string, 1)
-	errorChan := make(chan error, 1)
-
-	go func() {
-		defer close(answerChan)
-		defer close(errorChan)
-
-		numOfCheck := 5
-		firstCheck := true
-
-		for numOfCheck > 0 {
-			// The other peer might not answer immediately so
-			// we will wait a bit before checking for first time
-			if firstCheck {
-				select {
-				case <-time.After(time.Second * 2):
-					// Continue with first check
-				case <-ctx.Done():
-					errorChan <- ctx.Err()
-					return
-				}
-				firstCheck = false
-			}
-
-			numOfCheck--
-
-			// Refresh session data from storage
-			var sessionData struct {
-				Answer string `json:"answer"`
-			}
-			sessionRef := s.ref.Child(sessionID)
-			if err := sessionRef.Get(s.client.ctx, &sessionData); err != nil {
-				log.Println(err.Error())
-				continue
-			}
-
-			if sessionData.Answer != "" {
-				answerChan <- sessionData.Answer
-				return
-			}
-
-			if numOfCheck > 0 {
-				// Wait 5 seconds before checking again for answer
-				select {
-				case <-time.After(time.Second * 5):
-					// Continue polling
-				case <-ctx.Done():
-					errorChan <- ctx.Err()
-					return
-				}
-			}
+func (s *SessionService) CheckForAnswer(ctx context.Context, sessionID string) (string, error) {
+	// The other peer might not answer immediately so
+	// we will wait a bit before checking for first time
+	time.Sleep(time.Second * 2)
+	for i := 0; i < 5; i++ {
+		// Refresh session data from storage
+		var sessionData struct {
+			Answer string `json:"answer"`
+		}
+		sessionRef := s.ref.Child(sessionID)
+		if err := sessionRef.Get(s.client.ctx, &sessionData); err != nil {
+			log.Println(err.Error())
+			continue
 		}
 
-		// Delete the session if no answer is received
-		err := s.DeleteSession(sessionID)
-		if err != nil {
-			errorChan <- fmt.Errorf("error delete session: %s", err.Error())
+		if sessionData.Answer != "" {
+			return sessionData.Answer, nil
 		}
 
-		errorChan <- fmt.Errorf("timeout waiting for answer")
-	}()
+		// Wait 5 seconds before checking again for answer (except on last iteration)
+		if i < 4 {
+			select {
+			case <-time.After(time.Second * 5):
+				// Continue polling
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		}
+	}
 
-	return answerChan, errorChan
+	// Delete the session if no answer is received
+	if err := s.DeleteSession(sessionID); err != nil {
+		return "", fmt.Errorf("error delete session: %s", err.Error())
+	}
+
+	return "", fmt.Errorf("timeout waiting for answer")
 }
 
 // DeleteSession deletes a session by its ID

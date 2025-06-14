@@ -66,20 +66,12 @@ func (s *SignalingService) StartSenderSignallingProcess(ctx context.Context, pee
 
 	// Wait for answer from remote peer
 	fmt.Printf("Waiting for receiver to answer...")
-	answerChan, errorChan := s.sessionService.CheckForAnswer(ctx, sessionID)
-	var answer string
-
-answerLoop:
-	for {
-		select {
-		case answer = <-answerChan:
-			fmt.Printf("Got answer from remote peer: %s\n", answer)
-			break answerLoop
-		case err := <-errorChan:
-			fmt.Printf("Error occurred: %s\n", err)
-			return err
-		}
+	answer, err := s.sessionService.CheckForAnswer(ctx, sessionID)
+	if err != nil {
+		fmt.Printf("Error occurred: %s\n", err)
+		return err
 	}
+	fmt.Printf("Got answer from remote peer: %s\n", answer)
 
 	answerSD, err := utils.DecodeSessionDescription(answer)
 	if err != nil {

@@ -2,9 +2,9 @@ package transport
 
 import (
 	"context"
+	"fmt"
 
 	"yapfs/internal/config"
-	"yapfs/internal/processor"
 
 	"github.com/pion/webrtc/v4"
 )
@@ -29,12 +29,30 @@ func (d *DataChannelService) CreateFileSenderDataChannel(peerConn *webrtc.PeerCo
 	return d.sender.CreateFileSenderDataChannel(peerConn, label)
 }
 
-// SetupFileSender configures file sending using prepared data processor
-func (d *DataChannelService) SetupFileSender(ctx context.Context, dataProcessor *processor.DataProcessor) (<-chan struct{}, error) {
-	return d.sender.SetupFileSender(ctx, dataProcessor)
+// SetupFileSender configures file sending with the given file path
+func (d *DataChannelService) SetupFileSender(ctx context.Context, filePath string) (<-chan struct{}, error) {
+	return d.sender.SetupFileSender(ctx, filePath)
 }
 
 // SetupFileReceiver sets up handlers for receiving files and returns a completion channel
-func (d *DataChannelService) SetupFileReceiver(peerConn *webrtc.PeerConnection, dataProcessor *processor.DataProcessor, destPath string) (<-chan struct{}, error) {
-	return d.receiver.SetupFileReceiver(peerConn, dataProcessor, destPath)
+func (d *DataChannelService) SetupFileReceiver(peerConn *webrtc.PeerConnection, destPath string) (<-chan struct{}, error) {
+	return d.receiver.SetupFileReceiver(peerConn, destPath)
+}
+
+// Close cleans up the DataChannelService resources
+func (d *DataChannelService) Close() error {
+	var errs []error
+	
+	if err := d.sender.Close(); err != nil {
+		errs = append(errs, err)
+	}
+	
+	if err := d.receiver.Close(); err != nil {
+		errs = append(errs, err)
+	}
+	
+	if len(errs) > 0 {
+		return fmt.Errorf("errors closing data channel service: %v", errs)
+	}
+	return nil
 }

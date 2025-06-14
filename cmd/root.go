@@ -5,7 +5,6 @@ import (
 	"os"
 
 	"yapfs/internal/config"
-	"yapfs/internal/processor"
 	"yapfs/internal/signalling"
 	"yapfs/internal/transport"
 	"yapfs/internal/ui"
@@ -133,7 +132,7 @@ func Execute() {
 // }
 
 // createServices creates and wires up all the application services
-func createServices() (*transport.PeerService, *transport.DataChannelService, *signalling.SignalingService, *ui.ConsoleUI, *processor.DataProcessor) {
+func createServices() (*transport.PeerService, *transport.DataChannelService, *signalling.SignalingService, *ui.ConsoleUI) {
 	// Create connection state handler
 	stateHandler := &transport.DefaultConnectionStateHandler{}
 
@@ -141,9 +140,7 @@ func createServices() (*transport.PeerService, *transport.DataChannelService, *s
 	signalingService := signalling.NewSignalingService(cfg)
 	peerService := transport.NewPeerService(cfg, stateHandler)
 	consoleUI := ui.NewConsoleUI()
-
 	dataChannelService := transport.NewDataChannelService(cfg)
-	dataProcessor := processor.NewDataProcessor()
 
-	return peerService, dataChannelService, signalingService, consoleUI, dataProcessor
+	return peerService, dataChannelService, signalingService, consoleUI
 }

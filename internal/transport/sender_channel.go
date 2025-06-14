@@ -15,14 +15,16 @@ import (
 
 // SenderChannel manages data channel operations for sending files
 type SenderChannel struct {
-	config      *config.Config
-	dataChannel *webrtc.DataChannel
+	config        *config.Config
+	dataChannel   *webrtc.DataChannel
+	dataProcessor *processor.DataProcessor
 }
 
 // NewSenderChannel creates a new data channel sender
 func NewSenderChannel(cfg *config.Config) *SenderChannel {
 	return &SenderChannel{
-		config: cfg,
+		config:        cfg,
+		dataProcessor: processor.NewDataProcessor(),
 	}
 }
 
@@ -44,7 +46,7 @@ func (s *SenderChannel) CreateFileSenderDataChannel(peerConn *webrtc.PeerConnect
 }
 
 // SetupFileSender configures file sending using the internal data channel
-func (s *SenderChannel) SetupFileSender(ctx context.Context, dataProcessor *processor.DataProcessor) (<-chan struct{}, error) {
+func (s *SenderChannel) SetupFileSender(ctx context.Context, filePath string) (<-chan struct{}, error) {
 	if s.dataChannel == nil {
 		return nil, fmt.Errorf("data channel not created, call CreateFileSenderDataChannel first")
 	}
@@ -52,9 +54,15 @@ func (s *SenderChannel) SetupFileSender(ctx context.Context, dataProcessor *proc
 	doneCh := make(chan struct{})
 	var doneOnce sync.Once // Ensure doneCh is closed only once
 
+	// Prepare file for sending
+	err := s.dataProcessor.PrepareFileForSending(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare file for sending: %w", err)
+	}
+
 	// OnOpen sets an event handler which is invoked when the underlying data transport has been established (or re-established).
 	s.dataChannel.OnOpen(func() {
-		fileInfo, err := dataProcessor.GetFileInfo()
+		fileInfo, err := s.dataProcessor.GetFileInfo()
 		if err != nil {
 			log.Printf("Error getting file info: %v", err)
 			doneOnce.Do(func() { close(doneCh) })
@@ -68,7 +76,7 @@ func (s *SenderChannel) SetupFileSender(ctx context.Context, dataProcessor *proc
 			var totalBytesSent uint64
 
 			// Start file transfer
-			dataCh, errCh := dataProcessor.StartReadingFile(s.config.WebRTC.PacketSize)
+			dataCh, errCh := s.dataProcessor.StartReadingFile(s.config.WebRTC.PacketSize)
 			if dataCh == nil || errCh == nil {
 				log.Printf("No file prepared for transfer")
 				doneOnce.Do(func() { close(doneCh) })
@@ -159,4 +167,12 @@ func (s *SenderChannel) SetupFileSender(ctx context.Context, dataProcessor *proc
 	})
 
 	return doneCh, nil
+}
+
+// Close cleans up the SenderChannel resources
+func (s *SenderChannel) Close() error {
+	if s.dataProcessor != nil {
+		return s.dataProcessor.Close()
+	}
+	return nil
 }
