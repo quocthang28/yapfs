@@ -23,9 +23,9 @@ func GenerateCode(length int) (string, error) {
 	return string(result), nil
 }
 
-// IsValidCode validates that a code is exactly 6 alphanumeric characters
+// IsValidCode validates that a code is exactly 8 alphanumeric characters
 func IsValidCode(code string) bool {
-	if len(code) != 6 {
+	if len(code) != 8 {
 		return false
 	}
 	

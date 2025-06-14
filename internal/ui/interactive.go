@@ -34,12 +34,12 @@ func (c *ConsoleUI) WaitForUserInput(prompt string) {
 	scanner.Scan()
 }
 
-// InputCode prompts user to input a 6-character alphanumeric code with validation
+// InputCode prompts user to input an 8-character alphanumeric code with validation
 func (c *ConsoleUI) InputCode() (string, error) {
 	scanner := bufio.NewScanner(os.Stdin)
 
 	for {
-		fmt.Printf("Enter 6-character alphanumeric code: ")
+		fmt.Printf("Enter 8-character alphanumeric code: ")
 		scanner.Scan()
 		code := strings.TrimSpace(scanner.Text())
 
@@ -47,7 +47,7 @@ func (c *ConsoleUI) InputCode() (string, error) {
 			return strings.ToUpper(code), nil
 		}
 
-		fmt.Printf("❌ Invalid code. Please enter exactly 6 alphanumeric characters (letters and numbers only).\n")
+		fmt.Printf("❌ Invalid code. Please enter exactly 8 alphanumeric characters (letters and numbers only).\n")
 	}
 }
 
