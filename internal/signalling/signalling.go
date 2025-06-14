@@ -50,6 +50,9 @@ func (s *SignalingService) StartSenderSignallingProcess(ctx context.Context, pee
 		return fmt.Errorf("local description is nil after ICE gathering")
 	}
 
+	// Debug: Log the final offer SDP
+	fmt.Printf("DEBUG: Final offer SDP:\n%s\n", finalOffer.SDP)
+	
 	// Encode offer SDP
 	encodedOffer, err := utils.EncodeSessionDescription(*finalOffer)
 	if err != nil {
@@ -99,6 +102,9 @@ func (s *SignalingService) StartReceiverSignallingProcess(ctx context.Context, p
 	if err != nil {
 		return fmt.Errorf("failed to decode offer SDP: %w", err)
 	}
+
+	// Debug: Log the received offer SDP
+	fmt.Printf("DEBUG: Received offer SDP:\n%s\n", offerSD.SDP)
 
 	// Set remote description
 	err = peerConn.SetRemoteDescription(offerSD)

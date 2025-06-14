@@ -44,7 +44,7 @@ func (c *ConsoleUI) InputCode() (string, error) {
 		code := strings.TrimSpace(scanner.Text())
 
 		if utils.IsValidCode(code) {
-			return strings.ToUpper(code), nil
+			return code, nil
 		}
 
 		fmt.Printf("❌ Invalid code. Please enter exactly 8 alphanumeric characters (letters and numbers only).\n")

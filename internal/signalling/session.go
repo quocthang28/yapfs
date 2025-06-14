@@ -82,7 +82,7 @@ func (s *SessionService) CheckForAnswer(ctx context.Context, sessionID string) (
 	// The other peer might not answer immediately so
 	// we will wait a bit before checking for first time
 	time.Sleep(time.Second * 2)
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 10; i++ {
 		// Refresh session data from storage
 		var sessionData struct {
 			Answer string `json:"answer"`
@@ -98,7 +98,7 @@ func (s *SessionService) CheckForAnswer(ctx context.Context, sessionID string) (
 		}
 
 		// Wait 5 seconds before checking again for answer (except on last iteration)
-		if i < 4 {
+		if i < 9 {
 			select {
 			case <-time.After(time.Second * 5):
 				// Continue polling
@@ -126,16 +126,52 @@ func (s *SessionService) DeleteSession(sessionID string) error {
 }
 
 func (s *SessionService) GetOffer(sessionID string) (string, error) {
-	// Fetch offer data from storage
-	var sessionData struct {
-		Offer string `json:"offer"`
-	}
-	
+	log.Printf("DEBUG: Attempting to get offer for session ID: %s", sessionID)
+	log.Printf("DEBUG: Firebase ref path: %s", s.ref.Path)
+	log.Printf("DEBUG: Full ref path will be: %s/%s", s.ref.Path, sessionID)
+
+	// First check if the session exists at all
 	sessionRef := s.ref.Child(sessionID)
+	
+	// Try to get any data from this path
+	var sessionData map[string]interface{}
 	if err := sessionRef.Get(s.client.ctx, &sessionData); err != nil {
-		return "", fmt.Errorf("error fetching offer from storage for session %s: %w", sessionID, err)
+		log.Printf("DEBUG: Firebase Get error: %v", err)
+		return "", fmt.Errorf("error fetching session from storage for session %s: %w", sessionID, err)
 	}
 
-	return sessionData.Offer, nil
+	log.Printf("DEBUG: Full session data for %s: %+v", sessionID, sessionData)
+	log.Printf("DEBUG: Session data is nil: %v", sessionData == nil)
+	log.Printf("DEBUG: Session data length: %d", len(sessionData))
+
+	// If session data is empty, let's check if we can list all sessions
+	var allSessions map[string]interface{}
+	if err := s.ref.Get(s.client.ctx, &allSessions); err != nil {
+		log.Printf("DEBUG: Error fetching all sessions: %v", err)
+	} else {
+		log.Printf("DEBUG: All sessions in database: %+v", allSessions)
+	}
+
+	if len(sessionData) == 0 {
+		return "", fmt.Errorf("session %s not found in database", sessionID)
+	}
+
+	// Extract offer from the map
+	offerValue, exists := sessionData["offer"]
+	if !exists {
+		return "", fmt.Errorf("offer field does not exist for session %s", sessionID)
+	}
+
+	offer, ok := offerValue.(string)
+	if !ok {
+		return "", fmt.Errorf("offer field is not a string for session %s, got type %T", sessionID, offerValue)
+	}
+
+	if offer == "" {
+		return "", fmt.Errorf("offer is empty for session %s", sessionID)
+	}
+
+	log.Printf("DEBUG: Retrieved offer for session %s, length: %d", sessionID, len(offer))
+	return offer, nil
 }
 

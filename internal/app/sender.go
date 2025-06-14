@@ -74,23 +74,23 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	// Setup connection state handler
 	s.peerService.SetupConnectionStateHandler(peerConn, "sender")
 
-	// Start signalling process
-	err = s.signalingService.StartSenderSignallingProcess(ctx, peerConn)
-	if err != nil {
-		return fmt.Errorf("failed during signalling process: %w", err)
-	}
-
-	// Create data channel for file transfer
+	// Create data channel for file transfer BEFORE creating the offer
 	err = s.dataChannelService.CreateFileSenderDataChannel(peerConn, "fileTransfer")
 	if err != nil {
 		return fmt.Errorf("failed to create file sender data channel: %w", err)
 	}
 
+	// Start signalling process AFTER creating the data channel
+	err = s.signalingService.StartSenderSignallingProcess(ctx, peerConn)
+	if err != nil {
+		return fmt.Errorf("failed during signalling process: %w", err)
+	}
+	
 	doneCh, err := s.dataChannelService.SetupFileSender(ctx, opts.FilePath)
 	if err != nil {
 		return fmt.Errorf("failed to setup file sender: %w", err)
 	}
-
+	
 	// Show ready message
 	s.ui.ShowMessage("Sender is ready. File will start sending when the data channel opens.")
 
