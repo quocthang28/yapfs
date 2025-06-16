@@ -56,7 +56,6 @@ func (w *writerService) prepareFileForWriting(destDir string, metadata *FileMeta
 	return writer, destPath, nil
 }
 
-
 // writeData writes incoming data to the prepared file
 func (w *writerService) writeData(writer *fileWriter, data []byte) error {
 	if writer == nil {

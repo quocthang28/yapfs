@@ -3,7 +3,6 @@ package transport
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"log"
 	"sync"
 
@@ -32,11 +31,6 @@ func NewReceiverChannel(cfg *config.Config) *ReceiverChannel {
 
 // SetupFileReceiver sets up handlers for receiving files and returns a completion channel
 func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, destPath string) (<-chan struct{}, error) {
-	return r.setupFileReceiver(peerConn, destPath, nil)
-}
-
-// setupFileReceiver is the internal implementation for receiving files
-func (r *ReceiverChannel) setupFileReceiver(peerConn *webrtc.PeerConnection, destPath string, _ io.Writer) (<-chan struct{}, error) {
 	doneCh := make(chan struct{})
 	var doneOnce sync.Once // Ensure doneCh is closed only once
 
@@ -56,7 +50,6 @@ func (r *ReceiverChannel) setupFileReceiver(peerConn *webrtc.PeerConnection, des
 				if err != nil {
 					log.Printf("Error handling metadata: %v", err)
 					doneOnce.Do(func() { close(doneCh) })
-
 					return
 				}
 
@@ -65,11 +58,11 @@ func (r *ReceiverChannel) setupFileReceiver(peerConn *webrtc.PeerConnection, des
 				if err != nil {
 					log.Printf("Error preparing file for receiving: %v", err)
 					doneOnce.Do(func() { close(doneCh) })
-
 					return
 				}
 
 				log.Printf("Ready to receive file to: %s", finalPath)
+				return
 			}
 
 			// Handle EOF
@@ -77,7 +70,7 @@ func (r *ReceiverChannel) setupFileReceiver(peerConn *webrtc.PeerConnection, des
 				// Finish receiving and get total bytes
 				err := r.processEOFSignal()
 				if err != nil {
-					log.Printf("Error processing EOF singal: %v", err)
+					log.Printf("Error processing EOF signal: %v", err)
 				}
 
 				// Signal completion

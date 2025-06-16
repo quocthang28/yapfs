@@ -11,7 +11,7 @@ import (
 )
 
 // ConsoleUI implements simple console-based interactive UI
-type ConsoleUI struct {}
+type ConsoleUI struct{}
 
 // NewConsoleUI creates a new console-based interactive UI
 func NewConsoleUI() *ConsoleUI {

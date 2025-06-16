@@ -84,7 +84,7 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 		return fmt.Errorf("failed during signalling process: %w", err)
 	}
 
-	// Setup file receiver without progress first (we'll enhance this later when metadata is available)
+	// Setup file receiver (simple version for now)
 	doneCh, err := r.dataChannelService.SetupFileReceiver(peerConn, opts.DestPath)
 	if err != nil {
 		return fmt.Errorf("failed to setup file receiver data channel handler: %w", err)

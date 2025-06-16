@@ -50,7 +50,7 @@ Both peers will exchange SDP offers/answers manually to establish the connection
 			if err := viper.Unmarshal(cfg); err != nil {
 				log.Fatalf("Failed to unmarshal config: %v", err)
 			}
-			
+
 			// Manually override Firebase config as workaround for Viper unmarshal issue
 			if projectID := viper.GetString("firebase.project_id"); projectID != "" {
 				cfg.Firebase.ProjectID = projectID
@@ -88,11 +88,11 @@ func initConfig() {
 		// Set up Viper to look for config.json specifically
 		viper.SetConfigName("config") // name of config file (without extension)
 		viper.SetConfigType("json")   // REQUIRED if the config file does not have the extension in the name
-		
+
 		// Add search paths
-		viper.AddConfigPath(".")      // look in current directory first
+		viper.AddConfigPath(".")        // look in current directory first
 		viper.AddConfigPath("./config") // look in config subdirectory
-		
+
 		// Search in home directory
 		if home, err := os.UserHomeDir(); err == nil {
 			viper.AddConfigPath(home) // look in home directory

@@ -89,7 +89,7 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	}
 
 	// Setup file sender with progress
-	doneCh, progressCh, err := s.dataChannelService.SetupFileSenderWithProgress(ctx, opts.FilePath)
+	doneCh, progressCh, err := s.dataChannelService.SetupFileSender(ctx, opts.FilePath)
 	if err != nil {
 		return fmt.Errorf("failed to setup file sender: %w", err)
 	}
@@ -97,7 +97,7 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	// Create progress UI
 	progressUI := ui.NewProgressUI()
 	filename := filepath.Base(opts.FilePath)
-	
+
 	// Show ready message
 	s.ui.ShowMessage("Sender is ready. File will start sending when the data channel opens.")
 
@@ -110,7 +110,7 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 				started = true
 			}
 			progressUI.UpdateProgress(update)
-			
+
 			// Show final summary when transfer completes
 			if update.Percentage >= 100.0 {
 				progressUI.CompleteProgress()

@@ -130,7 +130,7 @@ func (r *readerService) startReadingWithProgress(reader *fileReader, chunkSize i
 			if err == io.EOF {
 				// Send EOF marker
 				dataCh <- DataChunk{Data: nil, EOF: true}
-				
+
 				// Send final progress
 				elapsed := time.Since(startTime)
 				avgThroughput := float64(bytesSent) / elapsed.Seconds() / (1024 * 1024) // MB/s
@@ -152,16 +152,16 @@ func (r *readerService) startReadingWithProgress(reader *fileReader, chunkSize i
 			data := make([]byte, n)
 			copy(data, buffer[:n])
 			dataCh <- DataChunk{Data: data, EOF: false}
-			
+
 			bytesSent += uint64(n)
-			
+
 			// Send progress update every second or when significant progress is made
 			now := time.Now()
 			if now.Sub(lastProgressTime) >= time.Second || bytesSent == totalBytes {
 				elapsed := now.Sub(startTime)
 				percentage := float64(bytesSent) / float64(totalBytes) * 100.0
 				throughput := float64(bytesSent) / elapsed.Seconds() / (1024 * 1024) // MB/s
-				
+
 				progressCh <- ProgressUpdate{
 					BytesSent:   bytesSent,
 					BytesTotal:  totalBytes,
@@ -169,7 +169,7 @@ func (r *readerService) startReadingWithProgress(reader *fileReader, chunkSize i
 					Throughput:  throughput,
 					ElapsedTime: elapsed,
 				}
-				
+
 				lastProgressTime = now
 			}
 		}

@@ -68,7 +68,7 @@ func (p *ProgressUI) UpdateProgress(update processor.ProgressUpdate) {
 
 	// Update the progress bar with bytes sent
 	p.bar.Set64(int64(update.BytesSent))
-	
+
 	// Update the description with throughput information
 	throughputStr := fmt.Sprintf("%.2f MB/s", update.Throughput)
 	p.bar.Describe(fmt.Sprintf("Sending (%.1f%% - %s)", update.Percentage, throughputStr))

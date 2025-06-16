@@ -6,11 +6,11 @@ import (
 )
 
 var (
-	ErrInvalidBufferConfig      = errors.New("buffered amount low threshold must be less than max buffered amount")
-	ErrInvalidPacketSize        = errors.New("packet size must be greater than 0")
-	ErrInvalidReportInterval    = errors.New("throughput report interval must be greater than 0")
-	ErrInvalidFirebaseConfig    = errors.New("Firebase credentials path must be set")
-	ErrInvalidFirebaseProjectID = errors.New("Firebase project ID must be set")
+	ErrInvalidBufferConfig        = errors.New("buffered amount low threshold must be less than max buffered amount")
+	ErrInvalidPacketSize          = errors.New("packet size must be greater than 0")
+	ErrInvalidReportInterval      = errors.New("throughput report interval must be greater than 0")
+	ErrInvalidFirebaseConfig      = errors.New("Firebase credentials path must be set")
+	ErrInvalidFirebaseProjectID   = errors.New("Firebase project ID must be set")
 	ErrInvalidFirebaseDatabaseURL = errors.New("Firebase database URL must be set")
 )
 

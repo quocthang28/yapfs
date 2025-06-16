@@ -50,16 +50,16 @@ func validateReceiveFlags(flags *ReceiveFlags) error {
 	if flags.DestPath == "" {
 		flags.DestPath = "." // Default to current directory
 	}
-	
+
 	// Resolve and validate destination path
 	resolvedPath, err := utils.ResolveDestinationPath(flags.DestPath)
 	if err != nil {
 		return fmt.Errorf("invalid destination path: %w", err)
 	}
-	
+
 	// Update the flag with the resolved path
 	flags.DestPath = resolvedPath
-	
+
 	// Future validations can be easily added here:
 	// if flags.Timeout <= 0 {
 	//     return fmt.Errorf("timeout must be positive")

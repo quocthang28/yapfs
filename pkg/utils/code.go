@@ -28,7 +28,7 @@ func IsValidCode(code string) bool {
 	if len(code) != 8 {
 		return false
 	}
-	
+
 	alphanumeric := regexp.MustCompile(`^[A-Za-z0-9]+$`)
 	return alphanumeric.MatchString(code)
 }

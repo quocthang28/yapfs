@@ -30,14 +30,9 @@ func (d *DataChannelService) CreateFileSenderDataChannel(peerConn *webrtc.PeerCo
 	return d.sender.CreateFileSenderDataChannel(peerConn, label)
 }
 
-// SetupFileSender configures file sending with the given file path
-func (d *DataChannelService) SetupFileSender(ctx context.Context, filePath string) (<-chan struct{}, error) {
+// SetupFileSender configures file sending with progress reporting
+func (d *DataChannelService) SetupFileSender(ctx context.Context, filePath string) (<-chan struct{}, <-chan processor.ProgressUpdate, error) {
 	return d.sender.SetupFileSender(ctx, filePath)
-}
-
-// SetupFileSenderWithProgress configures file sending with progress reporting
-func (d *DataChannelService) SetupFileSenderWithProgress(ctx context.Context, filePath string) (<-chan struct{}, <-chan processor.ProgressUpdate, error) {
-	return d.sender.SetupFileSenderWithProgress(ctx, filePath)
 }
 
 // SetupFileReceiver sets up handlers for receiving files and returns a completion channel
@@ -45,19 +40,18 @@ func (d *DataChannelService) SetupFileReceiver(peerConn *webrtc.PeerConnection, 
 	return d.receiver.SetupFileReceiver(peerConn, destPath)
 }
 
-
 // Close cleans up the DataChannelService resources
 func (d *DataChannelService) Close() error {
 	var errs []error
-	
+
 	if err := d.sender.Close(); err != nil {
 		errs = append(errs, err)
 	}
-	
+
 	if err := d.receiver.Close(); err != nil {
 		errs = append(errs, err)
 	}
-	
+
 	if len(errs) > 0 {
 		return fmt.Errorf("errors closing data channel service: %v", errs)
 	}

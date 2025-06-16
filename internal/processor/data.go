@@ -8,11 +8,11 @@ import (
 
 // ProgressUpdate represents file transfer progress information
 type ProgressUpdate struct {
-	BytesSent     uint64
-	BytesTotal    uint64
-	Percentage    float64
-	Throughput    float64        // bytes/second
-	ElapsedTime   time.Duration
+	BytesSent   uint64
+	BytesTotal  uint64
+	Percentage  float64
+	Throughput  float64 // bytes/second
+	ElapsedTime time.Duration
 }
 
 // Data channel should be init and manage data processor internally, app layer doesn't need to know about it
@@ -122,7 +122,6 @@ func (d *DataProcessor) PrepareFileForReceiving(destDir string, metadata *FileMe
 	d.currentWriter = writer
 	return destPath, nil
 }
-
 
 // WriteData writes incoming data to the prepared file (delegates to WriterService)
 func (d *DataProcessor) WriteData(data []byte) error {

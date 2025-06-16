@@ -69,8 +69,6 @@ func (f *FileService) ensureDir(dirPath string) error {
 	return nil
 }
 
-
-
 // createFileMetadata creates metadata for a file and encode it to send
 func (f *FileService) createFileMetadata(filePath string) ([]byte, error) {
 	stat, err := os.Stat(filePath)
