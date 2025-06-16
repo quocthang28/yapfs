@@ -36,6 +36,8 @@ func (p *ProgressUI) StartProgress(filename string, totalBytes uint64) {
 		progressbar.OptionSpinnerType(14),
 		progressbar.OptionFullWidth(),
 		progressbar.OptionSetRenderBlankState(true),
+		progressbar.OptionShowElapsedTimeOnFinish(),
+		progressbar.OptionSetPredictTime(false),
 	)
 }
 
