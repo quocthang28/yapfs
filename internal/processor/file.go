@@ -1,8 +1,11 @@
 package processor
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"mime"
 	"os"
 	"path/filepath"
@@ -13,8 +16,7 @@ type FileMetadata struct {
 	Name     string `json:"name"`     // Original filename
 	Size     int64  `json:"size"`     // File size in bytes
 	MimeType string `json:"mimeType"` // MIME type of the file
-	// Future fields:
-	// Checksum string `json:"checksum"` // SHA-256 checksum
+	Checksum string `json:"checksum"` // SHA-256 checksum
 }
 
 // FileService handles basic file operations
@@ -69,6 +71,22 @@ func (f *FileService) ensureDir(dirPath string) error {
 	return nil
 }
 
+// calculateFileChecksum calculates SHA-256 checksum of a file
+func (f *FileService) calculateFileChecksum(filePath string) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to open file for checksum: %w", err)
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", fmt.Errorf("failed to calculate checksum: %w", err)
+	}
+
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
 // createFileMetadata creates metadata for a file and encode it to send
 func (f *FileService) createFileMetadata(filePath string) ([]byte, error) {
 	stat, err := os.Stat(filePath)
@@ -85,10 +103,17 @@ func (f *FileService) createFileMetadata(filePath string) ([]byte, error) {
 		mimeType = "application/octet-stream" // Default for unknown types
 	}
 
+	// Calculate checksum
+	checksum, err := f.calculateFileChecksum(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to calculate file checksum: %w", err)
+	}
+
 	metadata := &FileMetadata{
 		Name:     filename,
 		Size:     stat.Size(),
 		MimeType: mimeType,
+		Checksum: checksum,
 	}
 
 	encoded, err := f.EncodeMetadata(metadata)

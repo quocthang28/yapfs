@@ -1,1 +1,0 @@
-ack on complete, sender sends ack, receiver received ack, verify checksum, send ok

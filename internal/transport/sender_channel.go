@@ -265,8 +265,6 @@ func (s *SenderChannel) handleFlowControl(ctx *FileTransferContext) bool {
 	if s.dataChannel.BufferedAmount() > s.config.WebRTC.MaxBufferedAmount {
 		select {
 		case <-ctx.sendMoreCh:
-			// Buffer drained, continue sending
-			log.Println("Buffer drained, continue sending")
 			return true
 		case <-ctx.ctx.Done():
 			log.Printf("File transfer cancelled: %v", ctx.ctx.Err())

@@ -82,7 +82,7 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 		return fmt.Errorf("failed to create file sender data channel: %w", err)
 	}
 
-	// Start signalling process AFTER creating the data channel
+	// Start signalling process
 	sessionID, err := s.signalingService.StartSenderSignallingProcess(ctx, peerConn)
 	if err != nil {
 		return fmt.Errorf("failed during signalling process: %w", err)

@@ -1,7 +1,10 @@
 package processor
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"hash"
 	"log"
 	"os"
 	"path/filepath"
@@ -25,6 +28,7 @@ type fileWriter struct {
 	destPath          string
 	totalBytesWritten uint64
 	metadata          *FileMetadata // Metadata of the file being received
+	hash              hash.Hash     // SHA-256 hash for checksum validation
 }
 
 // prepareFileForWriting opens a destination file for writing with metadata
@@ -43,14 +47,15 @@ func (w *writerService) prepareFileForWriting(destDir string, metadata *FileMeta
 		return nil, "", fmt.Errorf("failed to create destination file: %w", err)
 	}
 
-	log.Printf("File prepared for writing: %s (original: %s, size: %d bytes, type: %s)",
-		destPath, metadata.Name, metadata.Size, metadata.MimeType)
+	log.Printf("File prepared for writing: %s (original: %s, size: %d bytes, type: %s, checksum: %s)",
+		destPath, metadata.Name, metadata.Size, metadata.MimeType, metadata.Checksum)
 
 	writer := &fileWriter{
 		file:              file,
 		destPath:          destPath,
 		totalBytesWritten: 0,
 		metadata:          metadata,
+		hash:              sha256.New(),
 	}
 
 	return writer, destPath, nil
@@ -67,6 +72,8 @@ func (w *writerService) writeData(writer *fileWriter, data []byte) error {
 		return fmt.Errorf("failed to write data: %w", err)
 	}
 
+	// Update hash with the written data
+	writer.hash.Write(data[:n])
 	writer.totalBytesWritten += uint64(n)
 	return nil
 }
@@ -80,23 +87,26 @@ func (w *writerService) finishWriting(writer *fileWriter) (uint64, error) {
 	totalBytes := writer.totalBytesWritten
 	destPath := writer.destPath
 
-	err := writer.close()
+	// Calculate final checksum
+	calculatedChecksum := hex.EncodeToString(writer.hash.Sum(nil))
+	expectedChecksum := writer.metadata.Checksum
 
+	// Close the file first
+	err := writer.close()
 	if err != nil {
 		return totalBytes, fmt.Errorf("failed to close file: %w", err)
 	}
 
-	log.Printf("File writing completed: %s, %d bytes written", destPath, totalBytes)
+	// Validate checksum
+	if calculatedChecksum != expectedChecksum {
+		// Delete the corrupted file
+		os.Remove(destPath)
+		return totalBytes, fmt.Errorf("checksum validation failed: expected %s, got %s", expectedChecksum, calculatedChecksum)
+	}
+
+	log.Printf("File writing completed: %s, %d bytes written, checksum verified", destPath, totalBytes)
 	return totalBytes, nil
 }
-
-// getTotalBytesWritten returns the total number of bytes written so far
-// func (w *writerService) getTotalBytesWritten(writer *fileWriter) uint64 {
-// 	if writer == nil {
-// 		return 0
-// 	}
-// 	return writer.totalBytesWritten
-// }
 
 // close closes the internal file writer
 func (fw *fileWriter) close() error {
