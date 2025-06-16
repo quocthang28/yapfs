@@ -2,240 +2,149 @@ package processor
 
 import (
 	"fmt"
-	"io"
-	"log"
 	"os"
-	"path/filepath"
 )
 
 // Data channel should be init and manage data processor internally, app layer doesn't need to know about it
-// DataProcessor handles file operations, chunking, and reassembly for P2P file sharing
-// Future: Will include checksum validation and advanced data processing
+// DataProcessor coordinates file operations, chunking, and reassembly for P2P file sharing
+// Now uses composition with specialized services for better separation of concerns
 type DataProcessor struct {
-	// fileReader is used when this peer is the sender
-	fileReader *fileReader
+	fileService     *FileService
+	readerService   *ReaderService
+	writerService   *WriterService
 
-	// fileWriter is used when this peer is the receiver
-	fileWriter *fileWriter
+	// Current active reader/writer instances
+	currentReader *fileReader
+	currentWriter *fileWriter
 }
 
-// NewDataProcessor creates a new data processor
+// NewDataProcessor creates a new data processor with composed services
 func NewDataProcessor() *DataProcessor {
-	return &DataProcessor{}
+	fileService := NewFileService()
+	readerService := NewReaderService(fileService)
+	writerService := NewWriterService(fileService)
+
+	return &DataProcessor{
+		fileService:     fileService,
+		readerService:   readerService,
+		writerService:   writerService,
+	}
 }
 
-// OpenReader opens a file for reading
+// OpenReader opens a file for reading (delegates to FileService)
 func (d *DataProcessor) OpenReader(filePath string) (*os.File, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
-	}
-
-	return file, nil
+	return d.fileService.OpenReader(filePath)
 }
 
-// CreateWriter creates a file for writing
+// CreateWriter creates a file for writing (delegates to FileService)
 func (d *DataProcessor) CreateWriter(destPath string) (*os.File, error) {
-	// Create directory if it doesn't exist
-	dir := filepath.Dir(destPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	file, err := os.Create(destPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create file: %w", err)
-	}
-
-	return file, nil
+	return d.fileService.CreateWriter(destPath)
 }
 
-// GetFileInfoByPath returns information about a file by path
+// GetFileInfoByPath returns information about a file by path (delegates to FileService)
 func (d *DataProcessor) GetFileInfoByPath(filePath string) (os.FileInfo, error) {
-	stat, err := os.Stat(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get file info: %w", err)
-	}
-
-	return stat, nil
+	return d.fileService.GetFileInfo(filePath)
 }
 
-// DataChunk represents a chunk of file data
-type DataChunk struct {
-	Data []byte
-	EOF  bool
+// CreateFileMetadata creates metadata for a file (delegates to FileService)
+func (d *DataProcessor) CreateFileMetadata(filePath string) ([]byte, error) {
+	return d.fileService.CreateFileMetadata(filePath)
 }
 
-// fileReader wraps an open file for sending (internal to DataProcessor)
-type fileReader struct {
-	file     *os.File
-	fileInfo os.FileInfo
-	filePath string
+// EncodeMetadata encodes file metadata to JSON bytes (delegates to FileService)
+// func (d *DataProcessor) EncodeMetadata(metadata *FileMetadata) ([]byte, error) {
+// 	return d.fileService.EncodeMetadata(metadata)
+// }
+
+// DecodeMetadata decodes JSON bytes to file metadata (delegates to FileService)
+func (d *DataProcessor) DecodeMetadata(data []byte) (*FileMetadata, error) {
+	return d.fileService.DecodeMetadata(data)
 }
 
-// fileWriter wraps an open file for receiving (internal to DataProcessor)
-type fileWriter struct {
-	file              *os.File
-	destPath          string
-	totalBytesWritten uint64
-}
-
-// PrepareFileForSending opens file and validates it's ready for sending
+// PrepareFileForSending opens file and validates it's ready for sending (delegates to ReaderService)
 func (d *DataProcessor) PrepareFileForSending(filePath string) error {
 	// Close any existing file reader
-	if d.fileReader != nil {
-		d.fileReader.close()
+	if d.currentReader != nil {
+		d.currentReader.close()
 	}
 
-	// Open file for reading
-	file, err := d.OpenReader(filePath)
+	// Prepare file for reading using ReaderService
+	reader, err := d.readerService.PrepareFileForReading(filePath)
 	if err != nil {
-		return fmt.Errorf("failed to open file: %w", err)
+		return err
 	}
 
-	// Get file info
-	stat, err := file.Stat()
-	if err != nil {
-		file.Close()
-		return fmt.Errorf("failed to get file info: %w", err)
-	}
-
-	log.Printf("File prepared for sending: %s, size: %d bytes (%s)",
-		filePath, stat.Size(), d.FormatFileSize(stat.Size()))
-
-	d.fileReader = &fileReader{
-		file:     file,
-		fileInfo: stat,
-		filePath: filePath,
-	}
-
+	d.currentReader = reader
 	return nil
 }
 
-// StartReadingFile reads file chunks and sends them through the data channel
+// StartReadingFile reads file chunks and sends them through the data channel (delegates to ReaderService)
 func (d *DataProcessor) StartReadingFile(chunkSize int) (<-chan DataChunk, <-chan error) {
-	if d.fileReader == nil {
+	if d.currentReader == nil {
 		return nil, nil
 	}
 
-	dataCh := make(chan DataChunk, 1)
-	errCh := make(chan error, 1)
-
-	go func() {
-		defer close(dataCh)
-		defer close(errCh)
-		defer d.fileReader.close()
-
-		// Read and send file chunks
-		buffer := make([]byte, chunkSize)
-		for {
-			n, err := d.fileReader.file.Read(buffer)
-			if err == io.EOF {
-				// Send EOF marker
-				dataCh <- DataChunk{Data: nil, EOF: true}
-				break
-			}
-			if err != nil {
-				errCh <- fmt.Errorf("failed to read file: %w", err)
-				return
-			}
-
-			// Send data chunk
-			data := make([]byte, n)
-			copy(data, buffer[:n])
-			dataCh <- DataChunk{Data: data, EOF: false}
-		}
-
-		log.Printf("File transfer completed: %s", d.fileReader.filePath)
-		d.fileReader = nil // Clear the reader after transfer
-	}()
-
+	dataCh, errCh := d.readerService.StartReading(d.currentReader, chunkSize)
+	
+	// Clear the reader after transfer starts (ReaderService handles cleanup)
+	d.currentReader = nil
+	
 	return dataCh, errCh
 }
 
 // GetFileInfo returns the file information for the prepared file
 func (d *DataProcessor) GetFileInfo() (os.FileInfo, error) {
-	if d.fileReader == nil {
+	if d.currentReader == nil {
 		return nil, fmt.Errorf("no file prepared")
 	}
-	return d.fileReader.fileInfo, nil
+	return d.readerService.GetFileInfo(d.currentReader), nil
 }
 
-// PrepareFileForReceiving opens a destination file for writing
-func (d *DataProcessor) PrepareFileForReceiving(destPath string) error {
+// PrepareFileForReceiving opens a destination file for writing with metadata (delegates to WriterService)
+func (d *DataProcessor) PrepareFileForReceiving(destDir string, metadata *FileMetadata) (string, error) {
 	// Close any existing file writer
-	if d.fileWriter != nil {
-		d.fileWriter.close()
+	if d.currentWriter != nil {
+		d.currentWriter.close()
 	}
 
-	// Create destination file
-	file, err := d.CreateWriter(destPath)
+	// Prepare file for writing using WriterService
+	writer, destPath, err := d.writerService.PrepareFileForWriting(destDir, metadata)
 	if err != nil {
-		return fmt.Errorf("failed to create destination file: %w", err)
+		return "", err
 	}
 
-	log.Printf("File prepared for receiving: %s", destPath)
-
-	d.fileWriter = &fileWriter{
-		file:              file,
-		destPath:          destPath,
-		totalBytesWritten: 0,
-	}
-
-	return nil
+	d.currentWriter = writer
+	return destPath, nil
 }
 
-// WriteData writes incoming data to the prepared file
+// WriteData writes incoming data to the prepared file (delegates to WriterService)
 func (d *DataProcessor) WriteData(data []byte) error {
-	if d.fileWriter == nil {
-		return fmt.Errorf("no file prepared for writing")
-	}
-
-	n, err := d.fileWriter.file.Write(data)
-	if err != nil {
-		return fmt.Errorf("failed to write data: %w", err)
-	}
-
-	d.fileWriter.totalBytesWritten += uint64(n)
-	return nil
+	return d.writerService.WriteData(d.currentWriter, data)
 }
 
-// FinishReceiving completes the file reception and returns total bytes written
+// FinishReceiving completes the file reception and returns total bytes written (delegates to WriterService)
 func (d *DataProcessor) FinishReceiving() (uint64, error) {
-	if d.fileWriter == nil {
-		return 0, fmt.Errorf("no file prepared for writing")
-	}
-
-	totalBytes := d.fileWriter.totalBytesWritten
-	destPath := d.fileWriter.destPath
-
-	err := d.fileWriter.close()
-	d.fileWriter = nil
-
-	if err != nil {
-		return totalBytes, fmt.Errorf("failed to close file: %w", err)
-	}
-
-	log.Printf("File reception completed: %s, %d bytes written", destPath, totalBytes)
-	return totalBytes, nil
+	totalBytes, err := d.writerService.FinishWriting(d.currentWriter)
+	d.currentWriter = nil
+	return totalBytes, err
 }
 
 // Close closes both current file reader and writer
 func (d *DataProcessor) Close() error {
 	var errs []error
 
-	if d.fileReader != nil {
-		if err := d.fileReader.close(); err != nil {
+	if d.currentReader != nil {
+		if err := d.currentReader.close(); err != nil {
 			errs = append(errs, err)
 		}
-		d.fileReader = nil
+		d.currentReader = nil
 	}
 
-	if d.fileWriter != nil {
-		if err := d.fileWriter.close(); err != nil {
+	if d.currentWriter != nil {
+		if err := d.currentWriter.close(); err != nil {
 			errs = append(errs, err)
 		}
-		d.fileWriter = nil
+		d.currentWriter = nil
 	}
 
 	if len(errs) > 0 {
@@ -244,26 +153,7 @@ func (d *DataProcessor) Close() error {
 	return nil
 }
 
-// close closes the internal file reader
-func (fr *fileReader) close() error {
-	return fr.file.Close()
-}
-
-// close closes the internal file writer
-func (fw *fileWriter) close() error {
-	return fw.file.Close()
-}
-
-// FormatFileSize formats file size in human readable format // TODO: move to utils pkg
+// FormatFileSize formats file size in human readable format (delegates to FileService)
 func (d *DataProcessor) FormatFileSize(size int64) string {
-	const unit = 1024
-	if size < unit {
-		return fmt.Sprintf("%d B", size)
-	}
-	div, exp := int64(unit), 0
-	for n := size / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(size)/float64(div), "KMGTPE"[exp])
+	return d.fileService.FormatFileSize(size)
 }

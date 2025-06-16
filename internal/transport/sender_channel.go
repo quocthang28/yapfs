@@ -62,17 +62,27 @@ func (s *SenderChannel) SetupFileSender(ctx context.Context, filePath string) (<
 
 	// OnOpen sets an event handler which is invoked when the underlying data transport has been established (or re-established).
 	s.dataChannel.OnOpen(func() {
-		fileInfo, err := s.dataProcessor.GetFileInfo()
-		if err != nil {
-			log.Printf("Error getting file info: %v", err)
-			doneOnce.Do(func() { close(doneCh) })
-			return
-		}
-
-		log.Printf("File data channel opened: %s-%d. Starting file transfer, file size: %d bytes",
-			s.dataChannel.Label(), s.dataChannel.ID(), fileInfo.Size())
+		log.Printf("File data channel opened: %s-%d. Sending metadata first...",
+			s.dataChannel.Label(), s.dataChannel.ID())
 
 		go func() {
+			// First, send file metadata
+			metadataBytes, err := s.dataProcessor.CreateFileMetadata(filePath)
+			if err != nil {
+				log.Printf("Error creating file metadata: %v", err)
+				doneOnce.Do(func() { close(doneCh) })
+				return
+			}
+
+			// Send metadata with "METADATA:" prefix
+			metadataMsg := append([]byte("METADATA:"), metadataBytes...)
+			err = s.dataChannel.Send(metadataMsg)
+			if err != nil {
+				log.Printf("Error sending metadata: %v", err)
+				doneOnce.Do(func() { close(doneCh) })
+				return
+			}
+
 			var totalBytesSent uint64
 
 			// Start file transfer
@@ -88,7 +98,7 @@ func (s *SenderChannel) SetupFileSender(ctx context.Context, filePath string) (<
 				select {
 				case chunk, ok := <-dataCh:
 					if !ok {
-						// Channel closed unexpectedly
+						// Channel closed unexpectedly, TODO: clean up partially written file
 						log.Printf("Data channel closed unexpectedly")
 						doneOnce.Do(func() { close(doneCh) })
 						return

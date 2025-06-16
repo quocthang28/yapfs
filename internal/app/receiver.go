@@ -12,7 +12,7 @@ import (
 
 // ReceiverOptions configures the receiver application behavior
 type ReceiverOptions struct {
-	DestPath string // Required: destination path to save received file
+	DestPath string // Required: destination directory or file path to save received file
 	// Future options can be added here:
 	// Verbose  bool
 	// Timeout  time.Duration

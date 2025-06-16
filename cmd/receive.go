@@ -4,9 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"yapfs/internal/app"
+	"yapfs/pkg/utils"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -31,9 +30,10 @@ var receiveCmd = &cobra.Command{
 1. Create a WebRTC peer connection
 2. Wait for an SDP offer from the sender
 3. Generate an SDP answer
-4. Receive and save the file once connected
+4. Receive file metadata (name, size, type)
+5. Save the file with its original name once connected
 
-Use --dst to specify where to save the received file.`,
+Use --dst to specify directory where to save the received file (defaults to current directory).`,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		return validateReceiveFlags(&receiveFlags)
 	},
@@ -48,45 +48,22 @@ Use --dst to specify where to save the received file.`,
 // validateReceiveFlags validates the receive command flags
 func validateReceiveFlags(flags *ReceiveFlags) error {
 	if flags.DestPath == "" {
-		return fmt.Errorf("destination path is required")
+		flags.DestPath = "." // Default to current directory
 	}
+	
+	// Resolve and validate destination path
+	resolvedPath, err := utils.ResolveDestinationPath(flags.DestPath)
+	if err != nil {
+		return fmt.Errorf("invalid destination path: %w", err)
+	}
+	
+	// Update the flag with the resolved path
+	flags.DestPath = resolvedPath
+	
 	// Future validations can be easily added here:
 	// if flags.Timeout <= 0 {
 	//     return fmt.Errorf("timeout must be positive")
 	// }
-	return validateDestPath(flags.DestPath)
-}
-
-// validateDestPath ensures the destination path is valid for file creation
-func validateDestPath(destPath string) error {
-	// Check if path exists and is a directory
-	if info, err := os.Stat(destPath); err == nil {
-		if info.IsDir() {
-			return fmt.Errorf("destination path '%s' is a directory, please specify a file path", destPath)
-		}
-		// If file exists, it will be overwritten - this is acceptable
-		return nil
-	}
-
-	// If path doesn't exist, check if parent directory exists or can be created
-	dir := filepath.Dir(destPath)
-	if dir != "." && dir != "/" {
-		if info, err := os.Stat(dir); err != nil {
-			if os.IsNotExist(err) {
-				return fmt.Errorf("parent directory '%s' does not exist", dir)
-			}
-			return fmt.Errorf("cannot access parent directory '%s': %v", dir, err)
-		} else if !info.IsDir() {
-			return fmt.Errorf("parent path '%s' is not a directory", dir)
-		}
-	}
-
-	// Ensure the destination path looks like a file (has a filename)
-	filename := filepath.Base(destPath)
-	if filename == "." || filename == ".." {
-		return fmt.Errorf("destination path '%s' does not specify a filename", destPath)
-	}
-
 	return nil
 }
 
@@ -94,10 +71,7 @@ func init() {
 	rootCmd.AddCommand(receiveCmd)
 
 	// Define flags with struct binding
-	receiveCmd.Flags().StringVarP(&receiveFlags.DestPath, "dst", "d", "", "Destination path to save received file (required)")
-
-	// Mark required flags
-	receiveCmd.MarkFlagRequired("dst")
+	receiveCmd.Flags().StringVarP(&receiveFlags.DestPath, "dst", "d", ".", "Destination directory to save received file (defaults to current directory)")
 
 	// Bind flags to viper for environment variable support
 	viper.BindPFlag("receive.dst", receiveCmd.Flags().Lookup("dst"))
