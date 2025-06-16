@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"yapfs/internal/transport"
 	"yapfs/pkg/utils"
 )
 
@@ -38,4 +39,13 @@ func (c *ConsoleUI) InputCode() (string, error) {
 
 		fmt.Printf("Invalid code. Please enter again.\n")
 	}
+}
+
+// UpdateProgress displays progress updates for file transfer
+func (c *ConsoleUI) UpdateProgress(update transport.ProgressUpdate) {
+	fmt.Printf("\rReceiving: %.1f%% (%.2f MB/s) - %s / %s",
+		update.Percentage,
+		update.Throughput,
+		utils.FormatFileSize(int64(update.BytesSent)),
+		utils.FormatFileSize(int64(update.BytesTotal)))
 }

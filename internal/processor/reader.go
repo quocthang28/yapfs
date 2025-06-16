@@ -5,7 +5,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"time"
 	"yapfs/pkg/utils"
 )
 
@@ -97,90 +96,13 @@ func (r *readerService) startReading(reader *fileReader, chunkSize int) (<-chan 
 	return dataCh, errCh
 }
 
-// startReadingWithProgress reads file chunks with progress reporting
-func (r *readerService) startReadingWithProgress(reader *fileReader, chunkSize int) (<-chan DataChunk, <-chan ProgressUpdate, <-chan error) {
-	dataCh := make(chan DataChunk, 1)
-	progressCh := make(chan ProgressUpdate, 1)
-	errCh := make(chan error, 1)
-
-	go func() {
-		defer close(dataCh)
-		defer close(progressCh)
-		defer close(errCh)
-		defer reader.close()
-
-		var bytesSent uint64
-		totalBytes := uint64(reader.fileInfo.Size())
-		startTime := time.Now()
-		lastProgressTime := startTime
-
-		// Send initial progress
-		progressCh <- ProgressUpdate{
-			BytesSent:   0,
-			BytesTotal:  totalBytes,
-			Percentage:  0.0,
-			Throughput:  0.0,
-			ElapsedTime: 0,
-		}
-
-		// Read and send file chunks
-		buffer := make([]byte, chunkSize)
-		for {
-			n, err := reader.file.Read(buffer)
-			if err == io.EOF {
-				// Send EOF marker
-				dataCh <- DataChunk{Data: nil, EOF: true}
-
-				// Send final progress
-				elapsed := time.Since(startTime)
-				avgThroughput := float64(bytesSent) / elapsed.Seconds() / (1024 * 1024) // MB/s
-				progressCh <- ProgressUpdate{
-					BytesSent:   bytesSent,
-					BytesTotal:  totalBytes,
-					Percentage:  100.0,
-					Throughput:  avgThroughput,
-					ElapsedTime: elapsed,
-				}
-				break
-			}
-			if err != nil {
-				errCh <- fmt.Errorf("failed to read file: %w", err)
-				return
-			}
-
-			// Send data chunk
-			data := make([]byte, n)
-			copy(data, buffer[:n])
-			dataCh <- DataChunk{Data: data, EOF: false}
-
-			bytesSent += uint64(n)
-
-			// Send progress update every second or when significant progress is made
-			now := time.Now()
-			if now.Sub(lastProgressTime) >= time.Second || bytesSent == totalBytes {
-				elapsed := now.Sub(startTime)
-				percentage := float64(bytesSent) / float64(totalBytes) * 100.0
-				throughput := float64(bytesSent) / elapsed.Seconds() / (1024 * 1024) // MB/s
-
-				progressCh <- ProgressUpdate{
-					BytesSent:   bytesSent,
-					BytesTotal:  totalBytes,
-					Percentage:  percentage,
-					Throughput:  throughput,
-					ElapsedTime: elapsed,
-				}
-
-				lastProgressTime = now
-			}
-		}
-
-		log.Printf("File reading completed: %s", reader.filePath)
-	}()
-
-	return dataCh, progressCh, errCh
-}
 
 // close closes the internal file reader
 func (fr *fileReader) close() error {
 	return fr.file.Close()
+}
+
+// getFileSize returns the file size for progress calculation
+func (fr *fileReader) getFileSize() int64 {
+	return fr.fileInfo.Size()
 }

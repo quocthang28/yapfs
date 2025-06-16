@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"yapfs/internal/config"
 	"yapfs/internal/signalling"
@@ -84,13 +85,41 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 		return fmt.Errorf("failed during signalling process: %w", err)
 	}
 
-	// Setup file receiver (simple version for now)
-	doneCh, err := r.dataChannelService.SetupFileReceiver(peerConn, opts.DestPath)
+	// Setup file receiver with progress tracking
+	doneCh, progressCh, err := r.dataChannelService.SetupFileReceiver(peerConn, opts.DestPath)
 	if err != nil {
 		return fmt.Errorf("failed to setup file receiver data channel handler: %w", err)
 	}
 
 	r.ui.ShowMessage("Receiver is ready. Waiting for file transfer...")
+
+	// Create progress UI  
+	progressUI := ui.NewProgressUI()
+
+	// Start progress tracking
+	go func() {
+		var started bool
+		for update := range progressCh {
+			if !started {
+				// Get filename from metadata when available
+				var filename string
+				if update.MetaData.Name != "" {
+					filename = update.MetaData.Name
+				} else {
+					filename = filepath.Base(opts.DestPath)
+				}
+				progressUI.StartProgress(filename, update.BytesTotal)
+				started = true
+			}
+			progressUI.UpdateProgress(update)
+
+			// Show final summary when transfer completes
+			if update.Percentage >= 100.0 {
+				progressUI.CompleteProgress()
+				progressUI.ShowTransferSummary(update)
+			}
+		}
+	}()
 
 	// Wait for transfer completion
 	<-doneCh

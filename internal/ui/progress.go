@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"yapfs/internal/processor"
+	"yapfs/internal/transport"
 	"yapfs/pkg/utils"
 
 	"github.com/schollz/progressbar/v3"
@@ -61,7 +61,7 @@ func (p *ProgressUI) GetWriter() *progressbar.ProgressBar {
 }
 
 // UpdateProgress updates the progress bar with current transfer state
-func (p *ProgressUI) UpdateProgress(update processor.ProgressUpdate) {
+func (p *ProgressUI) UpdateProgress(update transport.ProgressUpdate) {
 	if p.bar == nil {
 		return
 	}
@@ -83,7 +83,7 @@ func (p *ProgressUI) CompleteProgress() {
 }
 
 // ShowTransferSummary displays a summary of the completed transfer
-func (p *ProgressUI) ShowTransferSummary(update processor.ProgressUpdate) {
+func (p *ProgressUI) ShowTransferSummary(update transport.ProgressUpdate) {
 	fmt.Printf("\n🎉 File transfer completed successfully!\n")
 	fmt.Printf("📊 Transfer Statistics:\n")
 	fmt.Printf("   • Total bytes sent: %s\n", utils.FormatFileSize(int64(update.BytesSent)))

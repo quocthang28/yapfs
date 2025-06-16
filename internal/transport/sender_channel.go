@@ -46,20 +46,23 @@ func (s *SenderChannel) CreateFileSenderDataChannel(peerConn *webrtc.PeerConnect
 }
 
 // SetupFileSender configures file sending with progress reporting
-func (s *SenderChannel) SetupFileSender(ctx context.Context, filePath string) (<-chan struct{}, <-chan processor.ProgressUpdate, error) {
+func (s *SenderChannel) SetupFileSender(ctx context.Context, filePath string) (<-chan struct{}, <-chan ProgressUpdate, error) {
 	if s.dataChannel == nil {
 		return nil, nil, fmt.Errorf("data channel not created, call CreateFileSenderDataChannel first")
 	}
 	sendMoreCh := make(chan struct{}, 3) // Buffer size 3 to handle multiple low threshold events
 	doneCh := make(chan struct{})
-	progressCh := make(chan processor.ProgressUpdate, 5) // Buffer progress updates
-	var doneOnce sync.Once                               // Ensure doneCh is closed only once
+	progressCh := make(chan ProgressUpdate, 5) // Buffer progress updates
+	var doneOnce sync.Once                     // Ensure doneCh is closed only once
 
 	// Prepare file for sending
 	err := s.dataProcessor.PrepareFileForSending(filePath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to prepare file for sending: %w", err)
 	}
+
+	// Get file size for progress calculation
+	totalBytes := uint64(s.dataProcessor.GetCurrentFileSize())
 
 	// OnOpen sets an event handler which is invoked when the underlying data transport has been established (or re-established).
 	s.dataChannel.OnOpen(func() {
@@ -86,24 +89,27 @@ func (s *SenderChannel) SetupFileSender(ctx context.Context, filePath string) (<
 				return
 			}
 
-			// Start file transfer with progress
-			dataCh, progressUpdateCh, errCh := s.dataProcessor.StartReadingFileWithProgress(s.config.WebRTC.PacketSize)
-			if dataCh == nil || errCh == nil || progressUpdateCh == nil {
+			// Start file transfer
+			dataCh, errCh := s.dataProcessor.StartReadingFile(s.config.WebRTC.PacketSize)
+			if dataCh == nil || errCh == nil {
 				log.Printf("No file prepared for transfer")
 				doneOnce.Do(func() { close(doneCh) })
 				return
 			}
 
-			// Forward progress updates
-			go func() {
-				for update := range progressUpdateCh {
-					select {
-					case progressCh <- update:
-					case <-ctx.Done():
-						return
-					}
-				}
-			}()
+			// Track progress locally in sender channel
+			var bytesSent uint64
+			startTime := time.Now()
+			lastProgressTime := startTime
+
+			// Send initial progress
+			progressCh <- ProgressUpdate{
+				BytesSent:   0,
+				BytesTotal:  totalBytes,
+				Percentage:  0.0,
+				Throughput:  0.0,
+				ElapsedTime: 0,
+			}
 
 			// Process data chunks
 			for {
@@ -125,6 +131,17 @@ func (s *SenderChannel) SetupFileSender(ctx context.Context, filePath string) (<
 							log.Printf("File transfer complete")
 						}
 
+						// Send final progress
+						elapsed := time.Since(startTime)
+						avgThroughput := float64(bytesSent) / elapsed.Seconds() / (1024 * 1024) // MB/s
+						progressCh <- ProgressUpdate{
+							BytesSent:   bytesSent,
+							BytesTotal:  totalBytes,
+							Percentage:  100.0,
+							Throughput:  avgThroughput,
+							ElapsedTime: elapsed,
+						}
+
 						// Close the channel after sending EOF
 						err = s.dataChannel.GracefulClose()
 						if err != nil {
@@ -141,6 +158,27 @@ func (s *SenderChannel) SetupFileSender(ctx context.Context, filePath string) (<
 						log.Printf("Error sending data: %v", err)
 						doneOnce.Do(func() { close(doneCh) })
 						return
+					}
+
+					// Update progress tracking
+					bytesSent += uint64(len(chunk.Data))
+
+					// Send progress update every second or when significant progress is made
+					now := time.Now()
+					if now.Sub(lastProgressTime) >= time.Second || bytesSent == totalBytes {
+						elapsed := now.Sub(startTime)
+						percentage := float64(bytesSent) / float64(totalBytes) * 100.0
+						throughput := float64(bytesSent) / elapsed.Seconds() / (1024 * 1024) // MB/s
+
+						progressCh <- ProgressUpdate{
+							BytesSent:   bytesSent,
+							BytesTotal:  totalBytes,
+							Percentage:  percentage,
+							Throughput:  throughput,
+							ElapsedTime: elapsed,
+						}
+
+						lastProgressTime = now
 					}
 
 					// Flow control: wait if buffer is too full

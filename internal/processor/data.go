@@ -3,17 +3,7 @@ package processor
 import (
 	"fmt"
 	"os"
-	"time"
 )
-
-// ProgressUpdate represents file transfer progress information
-type ProgressUpdate struct {
-	BytesSent   uint64
-	BytesTotal  uint64
-	Percentage  float64
-	Throughput  float64 // bytes/second
-	ElapsedTime time.Duration
-}
 
 // Data channel should be init and manage data processor internally, app layer doesn't need to know about it
 // DataProcessor coordinates file operations, chunking, and reassembly for P2P file sharing
@@ -92,19 +82,14 @@ func (d *DataProcessor) StartReadingFile(chunkSize int) (<-chan DataChunk, <-cha
 	return dataCh, errCh
 }
 
-// StartReadingFileWithProgress reads file chunks with progress reporting
-func (d *DataProcessor) StartReadingFileWithProgress(chunkSize int) (<-chan DataChunk, <-chan ProgressUpdate, <-chan error) {
+// GetCurrentFileSize returns the size of the currently prepared file for reading
+func (d *DataProcessor) GetCurrentFileSize() int64 {
 	if d.currentReader == nil {
-		return nil, nil, nil
+		return 0
 	}
-
-	dataCh, progressCh, errCh := d.readerService.startReadingWithProgress(d.currentReader, chunkSize)
-
-	// Clear the reader after transfer starts (ReaderService handles cleanup)
-	d.currentReader = nil
-
-	return dataCh, progressCh, errCh
+	return d.currentReader.getFileSize()
 }
+
 
 // PrepareFileForReceiving opens a destination file for writing with metadata (delegates to WriterService)
 func (d *DataProcessor) PrepareFileForReceiving(destDir string, metadata *FileMetadata) (string, error) {

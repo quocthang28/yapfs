@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"yapfs/internal/config"
 	"yapfs/internal/processor"
@@ -18,6 +19,13 @@ type ReceiverChannel struct {
 	dataChannel      *webrtc.DataChannel
 	dataProcessor    *processor.DataProcessor
 	metadataReceived bool // Track if metadata has been received
+	
+	// Progress tracking
+	totalBytes     uint64
+	bytesReceived  uint64
+	startTime      time.Time
+	lastUpdateTime time.Time
+	fileMetadata   *processor.FileMetadata
 }
 
 // NewReceiverChannel creates a new data channel receiver
@@ -29,10 +37,12 @@ func NewReceiverChannel(cfg *config.Config) *ReceiverChannel {
 	}
 }
 
-// SetupFileReceiver sets up handlers for receiving files and returns a completion channel
-func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, destPath string) (<-chan struct{}, error) {
+// SetupFileReceiver sets up handlers for receiving files and returns completion and progress channels
+func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, destPath string) (<-chan struct{}, <-chan ProgressUpdate, error) {
 	doneCh := make(chan struct{})
-	var doneOnce sync.Once // Ensure doneCh is closed only once
+	progressCh := make(chan ProgressUpdate, 5) // Buffer progress updates
+	var doneOnce sync.Once                     // Ensure doneCh is closed only once
+	var progressOnce sync.Once                 // Ensure progressCh is closed only once
 
 	// OnDataChannel sets an event handler which is invoked when a data channel message arrives from a remote peer.
 	peerConn.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
@@ -41,6 +51,9 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, des
 
 		r.dataChannel.OnOpen(func() {
 			log.Printf("File transfer data channel opened: %s-%d. Waiting for metadata...", r.dataChannel.Label(), r.dataChannel.ID())
+			// Initialize progress tracking
+			r.startTime = time.Now()
+			r.lastUpdateTime = r.startTime
 		})
 
 		r.dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
@@ -51,6 +64,21 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, des
 					log.Printf("Error handling metadata: %v", err)
 					doneOnce.Do(func() { close(doneCh) })
 					return
+				}
+
+				// Set up progress tracking with file size
+				r.totalBytes = uint64(metadata.Size)
+				r.bytesReceived = 0
+				r.fileMetadata = metadata
+
+				// Send initial progress
+				progressCh <- ProgressUpdate{
+					BytesSent:   0,
+					BytesTotal:  r.totalBytes,
+					Percentage:  0.0,
+					Throughput:  0.0,
+					ElapsedTime: 0,
+					MetaData:    *metadata,
 				}
 
 				// Prepare file for receiving with metadata
@@ -73,7 +101,23 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, des
 					log.Printf("Error processing EOF signal: %v", err)
 				}
 
-				// Signal completion
+				// Send final progress
+				elapsed := time.Since(r.startTime)
+				avgThroughput := float64(r.bytesReceived) / elapsed.Seconds() / (1024 * 1024) // MB/s
+				update := ProgressUpdate{
+					BytesSent:   r.bytesReceived,
+					BytesTotal:  r.totalBytes,
+					Percentage:  100.0,
+					Throughput:  avgThroughput,
+					ElapsedTime: elapsed,
+				}
+				if r.fileMetadata != nil {
+					update.MetaData = *r.fileMetadata
+				}
+				progressCh <- update
+
+				// Close progress channel and signal completion
+				progressOnce.Do(func() { close(progressCh) })
 				doneOnce.Do(func() { close(doneCh) })
 				return
 			}
@@ -90,22 +134,51 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, des
 				log.Printf("Error writing data: %v", err)
 				return
 			}
+
+			// Update progress tracking
+			r.bytesReceived += uint64(len(msg.Data))
+
+			// Send progress update every second or when significant progress is made
+			now := time.Now()
+			if now.Sub(r.lastUpdateTime) >= time.Second || r.bytesReceived == r.totalBytes {
+				elapsed := now.Sub(r.startTime)
+				percentage := float64(r.bytesReceived) / float64(r.totalBytes) * 100.0
+				throughput := float64(r.bytesReceived) / elapsed.Seconds() / (1024 * 1024) // MB/s
+
+				update := ProgressUpdate{
+					BytesSent:   r.bytesReceived,
+					BytesTotal:  r.totalBytes,
+					Percentage:  percentage,
+					Throughput:  throughput,
+					ElapsedTime: elapsed,
+				}
+				if r.fileMetadata != nil {
+					update.MetaData = *r.fileMetadata
+				}
+				progressCh <- update
+
+				r.lastUpdateTime = now
+			}
 		})
 
 		r.dataChannel.OnClose(func() {
 			log.Printf("File transfer data channel closed")
 			// Clean up any open files
 			r.dataProcessor.Close()
+			// Close progress channel if not already closed
+			progressOnce.Do(func() { close(progressCh) })
 		})
 
 		r.dataChannel.OnError(func(err error) {
 			log.Printf("File transfer data channel error: %v", err)
 			// Clean up any open files
 			r.dataProcessor.Close()
+			// Close progress channel if not already closed
+			progressOnce.Do(func() { close(progressCh) })
 		})
 	})
 
-	return doneCh, nil
+	return doneCh, progressCh, nil
 }
 
 // Close cleans up the ReceiverChannel resources
