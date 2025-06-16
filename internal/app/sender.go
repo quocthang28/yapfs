@@ -83,7 +83,7 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	}
 
 	// Start signalling process AFTER creating the data channel
-	err = s.signalingService.StartSenderSignallingProcess(ctx, peerConn)
+	sessionID, err := s.signalingService.StartSenderSignallingProcess(ctx, peerConn)
 	if err != nil {
 		return fmt.Errorf("failed during signalling process: %w", err)
 	}
@@ -121,5 +121,15 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 
 	// Wait for transfer completion
 	<-doneCh
+	
+	// Clear Firebase session after successful transfer
+	if sessionID != "" {
+		if err := s.signalingService.ClearSession(sessionID); err != nil {
+			log.Printf("Warning: Failed to clear Firebase session: %v", err)
+		} else {
+			log.Printf("Firebase session cleared successfully")
+		}
+	}
+	
 	return nil
 }

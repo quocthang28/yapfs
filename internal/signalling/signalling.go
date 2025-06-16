@@ -35,11 +35,11 @@ func NewSignalingService(cfg *config.Config) *SignalingService {
 }
 
 // StartSenderSignallingProcess orchestrates the complete sender signaling flow
-func (s *SignalingService) StartSenderSignallingProcess(ctx context.Context, peerConn *webrtc.PeerConnection) error {
+func (s *SignalingService) StartSenderSignallingProcess(ctx context.Context, peerConn *webrtc.PeerConnection) (string, error) {
 	// Create offer
 	_, err := s.CreateOffer(peerConn)
 	if err != nil {
-		return fmt.Errorf("failed to create offer: %w", err)
+		return "", fmt.Errorf("failed to create offer: %w", err)
 	}
 
 	// Wait for ICE gathering to complete
@@ -48,47 +48,47 @@ func (s *SignalingService) StartSenderSignallingProcess(ctx context.Context, pee
 	// Get the final offer with ICE candidates
 	finalOffer := peerConn.LocalDescription()
 	if finalOffer == nil {
-		return fmt.Errorf("local description is nil after ICE gathering")
+		return "", fmt.Errorf("local description is nil after ICE gathering")
 	}
 
 	// Encode offer SDP
 	encodedOffer, err := utils.EncodeSessionDescription(*finalOffer)
 	if err != nil {
-		return fmt.Errorf("failed to encode offer SDP: %w", err)
+		return "", fmt.Errorf("failed to encode offer SDP: %w", err)
 	}
 
 	// Upload session with offer to Firebase
-	sessionID, err := s.sessionService.CreateSessionWithOffer(encodedOffer)
+	sessionID, err := s.sessionService.createSessionWithOffer(encodedOffer)
 	if err != nil {
-		return fmt.Errorf("failed to create session with offer: %w", err)
+		return "", fmt.Errorf("failed to create session with offer: %w", err)
 	}
 
 	log.Printf("Share this code with the receiver: %s\n", sessionID)
 
 	// Wait for answer from remote peer
-	answer, err := s.sessionService.CheckForAnswer(ctx, sessionID)
+	answer, err := s.sessionService.checkForAnswer(ctx, sessionID)
 	if err != nil {
 		log.Printf("Error occurred: %s\n", err)
-		return err
+		return sessionID, err
 	}
 
 	answerSD, err := utils.DecodeSessionDescription(answer)
 	if err != nil {
-		return err
+		return sessionID, err
 	}
 
 	err = peerConn.SetRemoteDescription(answerSD)
 	if err != nil {
-		return fmt.Errorf("failed to set remote description: %w", err)
+		return sessionID, fmt.Errorf("failed to set remote description: %w", err)
 	}
 
-	return nil
+	return sessionID, nil
 }
 
 // StartReceiverSignallingProcess orchestrates the complete receiver signaling flow
 func (s *SignalingService) StartReceiverSignallingProcess(ctx context.Context, peerConn *webrtc.PeerConnection, sessionID string) error {
 	// Get the offer from the session
-	encodedOffer, err := s.sessionService.GetOffer(sessionID)
+	encodedOffer, err := s.sessionService.getOffer(sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to get offer from session: %w", err)
 	}
@@ -127,7 +127,7 @@ func (s *SignalingService) StartReceiverSignallingProcess(ctx context.Context, p
 	}
 
 	// Upload answer to Firebase
-	err = s.sessionService.UpdateAnswer(sessionID, encodedAnswer)
+	err = s.sessionService.updateAnswer(sessionID, encodedAnswer)
 	if err != nil {
 		return fmt.Errorf("failed to upload answer to Firebase: %w", err)
 	}
@@ -163,4 +163,9 @@ func (s *SignalingService) CreateAnswer(peerConn *webrtc.PeerConnection) (*webrt
 	}
 
 	return &answer, nil
+}
+
+// ClearSession deletes a Firebase session by its ID
+func (s *SignalingService) ClearSession(sessionID string) error {
+	return s.sessionService.deleteSession(sessionID)
 }

@@ -69,145 +69,7 @@ func (s *SenderChannel) SetupFileSender(ctx context.Context, filePath string) (<
 		log.Printf("File data channel opened: %s-%d. Sending metadata first...",
 			s.dataChannel.Label(), s.dataChannel.ID())
 
-		go func() {
-			defer close(progressCh) // Close progress channel when done
-
-			// First, send file metadata
-			metadataBytes, err := s.dataProcessor.CreateFileMetadata(filePath)
-			if err != nil {
-				log.Printf("Error creating file metadata: %v", err)
-				doneOnce.Do(func() { close(doneCh) })
-				return
-			}
-
-			// Send metadata with "METADATA:" prefix
-			metadataMsg := append([]byte("METADATA:"), metadataBytes...)
-			err = s.dataChannel.Send(metadataMsg)
-			if err != nil {
-				log.Printf("Error sending metadata: %v", err)
-				doneOnce.Do(func() { close(doneCh) })
-				return
-			}
-
-			// Start file transfer
-			dataCh, errCh := s.dataProcessor.StartReadingFile(s.config.WebRTC.PacketSize)
-			if dataCh == nil || errCh == nil {
-				log.Printf("No file prepared for transfer")
-				doneOnce.Do(func() { close(doneCh) })
-				return
-			}
-
-			// Track progress locally in sender channel
-			var bytesSent uint64
-			startTime := time.Now()
-			lastProgressTime := startTime
-
-			// Send initial progress
-			progressCh <- ProgressUpdate{
-				BytesSent:   0,
-				BytesTotal:  totalBytes,
-				Percentage:  0.0,
-				Throughput:  0.0,
-				ElapsedTime: 0,
-			}
-
-			// Process data chunks
-			for {
-				select {
-				case chunk, ok := <-dataCh:
-					if !ok {
-						// Channel closed unexpectedly, TODO: clean up partially written file
-						log.Printf("Data channel closed unexpectedly")
-						doneOnce.Do(func() { close(doneCh) })
-						return
-					}
-
-					if chunk.EOF {
-						// Send EOF marker
-						err := s.dataChannel.Send([]byte("EOF"))
-						if err != nil {
-							log.Printf("Error sending EOF: %v", err)
-						} else {
-							log.Printf("File transfer complete")
-						}
-
-						// Send final progress
-						elapsed := time.Since(startTime)
-						avgThroughput := float64(bytesSent) / elapsed.Seconds() / (1024 * 1024) // MB/s
-						progressCh <- ProgressUpdate{
-							BytesSent:   bytesSent,
-							BytesTotal:  totalBytes,
-							Percentage:  100.0,
-							Throughput:  avgThroughput,
-							ElapsedTime: elapsed,
-						}
-
-						// Close the channel after sending EOF
-						err = s.dataChannel.GracefulClose()
-						if err != nil {
-							log.Printf("Error closing channel: %v", err)
-						}
-
-						doneOnce.Do(func() { close(doneCh) })
-						return
-					}
-
-					// Send data chunk
-					err := s.dataChannel.Send(chunk.Data)
-					if err != nil {
-						log.Printf("Error sending data: %v", err)
-						doneOnce.Do(func() { close(doneCh) })
-						return
-					}
-
-					// Update progress tracking
-					bytesSent += uint64(len(chunk.Data))
-
-					// Send progress update every second or when significant progress is made
-					now := time.Now()
-					if now.Sub(lastProgressTime) >= time.Second || bytesSent == totalBytes {
-						elapsed := now.Sub(startTime)
-						percentage := float64(bytesSent) / float64(totalBytes) * 100.0
-						throughput := float64(bytesSent) / elapsed.Seconds() / (1024 * 1024) // MB/s
-
-						progressCh <- ProgressUpdate{
-							BytesSent:   bytesSent,
-							BytesTotal:  totalBytes,
-							Percentage:  percentage,
-							Throughput:  throughput,
-							ElapsedTime: elapsed,
-						}
-
-						lastProgressTime = now
-					}
-
-					// Flow control: wait if buffer is too full
-					if s.dataChannel.BufferedAmount() > s.config.WebRTC.MaxBufferedAmount {
-						select {
-						case <-sendMoreCh:
-							// Buffer drained, continue sending
-						case <-ctx.Done():
-							log.Printf("File transfer cancelled: %v", ctx.Err())
-							doneOnce.Do(func() { close(doneCh) })
-							return
-						case <-time.After(30 * time.Second):
-							log.Printf("Flow control timeout - WebRTC channel may be dead")
-							doneOnce.Do(func() { close(doneCh) })
-							return
-						}
-					}
-
-				case err := <-errCh:
-					log.Printf("Error during file transfer: %v", err)
-					doneOnce.Do(func() { close(doneCh) })
-					return
-				case <-ctx.Done():
-					log.Printf("File transfer cancelled: %v", ctx.Err())
-					doneOnce.Do(func() { close(doneCh) })
-					return
-				}
-			}
-		}()
+		go s.startFileTransfer(ctx, filePath, totalBytes, sendMoreCh, doneCh, progressCh, &doneOnce)
 	})
 
 	// Set up flow control
@@ -225,6 +87,214 @@ func (s *SenderChannel) SetupFileSender(ctx context.Context, filePath string) (<
 	})
 
 	return doneCh, progressCh, nil
+}
+
+// FileTransferContext contains context for file transfer operations
+type FileTransferContext struct {
+	ctx        context.Context
+	filePath   string
+	totalBytes uint64
+	sendMoreCh chan struct{}
+	doneCh     chan struct{}
+	progressCh chan ProgressUpdate
+	doneOnce   *sync.Once
+
+	// Progress tracking
+	bytesSent        uint64
+	startTime        time.Time
+	lastProgressTime time.Time
+}
+
+// startFileTransfer manages the complete file transfer process
+func (s *SenderChannel) startFileTransfer(ctx context.Context, filePath string, totalBytes uint64, sendMoreCh chan struct{}, doneCh chan struct{}, progressCh chan ProgressUpdate, doneOnce *sync.Once) {
+	defer close(progressCh) // Close progress channel when done
+
+	transferCtx := &FileTransferContext{
+		ctx:              ctx,
+		filePath:         filePath,
+		totalBytes:       totalBytes,
+		sendMoreCh:       sendMoreCh,
+		doneCh:           doneCh,
+		progressCh:       progressCh,
+		doneOnce:         doneOnce,
+		bytesSent:        0,
+		startTime:        time.Now(),
+		lastProgressTime: time.Now(),
+	}
+
+	// Send file metadata
+	if err := s.sendMetadataPhase(transferCtx); err != nil {
+		log.Printf("Error sending metadata: %v", err)
+		transferCtx.doneOnce.Do(func() { close(transferCtx.doneCh) })
+		return
+	}
+
+	// Start file data transfer
+	s.sendFileDataPhase(transferCtx)
+}
+
+// sendMetadataPhase handles sending file metadata
+func (s *SenderChannel) sendMetadataPhase(ctx *FileTransferContext) error {
+	// Send initial progress
+	ctx.progressCh <- ProgressUpdate{
+		BytesSent:   0,
+		BytesTotal:  ctx.totalBytes,
+		Percentage:  0.0,
+		Throughput:  0.0,
+		ElapsedTime: 0,
+	}
+
+	return s.sendFileMetaData(ctx.filePath)
+}
+
+// sendFileDataPhase handles the main file data transfer loop
+func (s *SenderChannel) sendFileDataPhase(ctx *FileTransferContext) {
+	// Start file transfer
+	dataCh, errCh := s.dataProcessor.StartReadingFile(s.config.WebRTC.PacketSize)
+	if dataCh == nil || errCh == nil {
+		log.Printf("No file prepared for transfer")
+		ctx.doneOnce.Do(func() { close(ctx.doneCh) })
+		return
+	}
+
+	// Process data chunks
+	for {
+		select {
+		case chunk, ok := <-dataCh:
+			if !ok {
+				// Channel closed unexpectedly, TODO: clean up partially written file
+				log.Printf("Data channel closed unexpectedly")
+				ctx.doneOnce.Do(func() { close(ctx.doneCh) })
+				return
+			}
+
+			if chunk.EOF {
+				s.sendEOFPhase(ctx)
+				return
+			}
+
+			if !s.sendDataChunk(ctx, chunk) {
+				return // Error occurred, transfer terminated
+			}
+
+			if !s.handleFlowControl(ctx) {
+				return // Flow control timeout or cancellation
+			}
+
+		case err := <-errCh:
+			log.Printf("Error during file transfer: %v", err)
+			ctx.doneOnce.Do(func() { close(ctx.doneCh) })
+			return
+		case <-ctx.ctx.Done():
+			log.Printf("File transfer cancelled: %v", ctx.ctx.Err())
+			ctx.doneOnce.Do(func() { close(ctx.doneCh) })
+			return
+		}
+	}
+}
+
+// sendDataChunk sends a single data chunk and updates progress
+func (s *SenderChannel) sendDataChunk(ctx *FileTransferContext, chunk processor.DataChunk) bool {
+	// Send data chunk
+	err := s.dataChannel.Send(chunk.Data)
+	if err != nil {
+		log.Printf("Error sending data: %v", err)
+		ctx.doneOnce.Do(func() { close(ctx.doneCh) })
+		return false
+	}
+
+	// Update progress tracking
+	ctx.bytesSent += uint64(len(chunk.Data))
+	s.updateProgress(ctx)
+	return true
+}
+
+// sendEOFPhase handles EOF signaling and cleanup
+func (s *SenderChannel) sendEOFPhase(ctx *FileTransferContext) {
+	// Send EOF marker
+	err := s.dataChannel.Send([]byte("EOF"))
+	if err != nil {
+		log.Printf("Error sending EOF: %v", err)
+	} else {
+		log.Printf("File transfer complete")
+	}
+
+	// Send final progress
+	elapsed := time.Since(ctx.startTime)
+	avgThroughput := float64(ctx.bytesSent) / elapsed.Seconds() / (1024 * 1024) // MB/s
+	ctx.progressCh <- ProgressUpdate{
+		BytesSent:   ctx.bytesSent,
+		BytesTotal:  ctx.totalBytes,
+		Percentage:  100.0,
+		Throughput:  avgThroughput,
+		ElapsedTime: elapsed,
+	}
+
+	// Close the channel after sending EOF
+	err = s.dataChannel.GracefulClose()
+	if err != nil {
+		log.Printf("Error closing channel: %v", err)
+	}
+
+	ctx.doneOnce.Do(func() { close(ctx.doneCh) })
+}
+
+// updateProgress sends progress updates at appropriate intervals
+func (s *SenderChannel) updateProgress(ctx *FileTransferContext) {
+	now := time.Now()
+	if now.Sub(ctx.lastProgressTime) >= time.Second || ctx.bytesSent == ctx.totalBytes {
+		elapsed := now.Sub(ctx.startTime)
+		percentage := float64(ctx.bytesSent) / float64(ctx.totalBytes) * 100.0
+		throughput := float64(ctx.bytesSent) / elapsed.Seconds() / (1024 * 1024) // MB/s
+
+		ctx.progressCh <- ProgressUpdate{
+			BytesSent:   ctx.bytesSent,
+			BytesTotal:  ctx.totalBytes,
+			Percentage:  percentage,
+			Throughput:  throughput,
+			ElapsedTime: elapsed,
+		}
+
+		ctx.lastProgressTime = now
+	}
+}
+
+// handleFlowControl manages flow control and backpressure
+func (s *SenderChannel) handleFlowControl(ctx *FileTransferContext) bool {
+	// Flow control: wait if buffer is too full
+	if s.dataChannel.BufferedAmount() > s.config.WebRTC.MaxBufferedAmount {
+		select {
+		case <-ctx.sendMoreCh:
+			// Buffer drained, continue sending
+			log.Println("Buffer drained, continue sending")
+			return true
+		case <-ctx.ctx.Done():
+			log.Printf("File transfer cancelled: %v", ctx.ctx.Err())
+			ctx.doneOnce.Do(func() { close(ctx.doneCh) })
+			return false
+		case <-time.After(30 * time.Second):
+			log.Printf("Flow control timeout - WebRTC channel may be dead")
+			ctx.doneOnce.Do(func() { close(ctx.doneCh) })
+			return false
+		}
+	}
+	return true
+}
+
+func (s *SenderChannel) sendFileMetaData(filePath string) error {
+	metadataBytes, err := s.dataProcessor.CreateFileMetadata(filePath)
+	if err != nil {
+		return fmt.Errorf("error creating file metadata: %w", err)
+	}
+
+	// Send metadata with "METADATA:" prefix
+	metadataMsg := append([]byte("METADATA:"), metadataBytes...)
+	err = s.dataChannel.Send(metadataMsg)
+	if err != nil {
+		return fmt.Errorf("error sending metadata: %w", err)
+	}
+
+	return nil
 }
 
 // Close cleans up the SenderChannel resources

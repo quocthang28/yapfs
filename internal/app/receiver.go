@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"log"
 	"path/filepath"
 
 	"yapfs/internal/config"
@@ -124,5 +125,15 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	// Wait for transfer completion
 	<-doneCh
 	r.ui.ShowMessage("File transfer completed successfully!")
+	
+	// Clear Firebase session after successful transfer
+	if code != "" {
+		if err := r.signalingService.ClearSession(code); err != nil {
+			log.Printf("Warning: Failed to clear Firebase session: %v", err)
+		} else {
+			log.Printf("Firebase session cleared successfully")
+		}
+	}
+	
 	return nil
 }

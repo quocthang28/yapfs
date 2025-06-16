@@ -25,28 +25,7 @@ type SessionService struct {
 	ref    *db.Ref
 }
 
-func (s *SessionService) CreateSession() (string, error) {
-	// This code will be displayed to user, it is also the session ID
-	code, err := utils.GenerateCode(8)
-	if err != nil {
-		return "", fmt.Errorf("error generating session code %s", err)
-	}
-
-	sessionRef := s.ref.Child(code)
-	sessionData := map[string]any{
-		"sessionId": code,
-		"offer":     "",
-		"answer":    "",
-	}
-	err = sessionRef.Set(s.client.ctx, sessionData)
-	if err != nil {
-		return "", fmt.Errorf("error creating session %s", err)
-	}
-
-	return code, nil
-}
-
-func (s *SessionService) CreateSessionWithOffer(offer string) (string, error) {
+func (s *SessionService) createSessionWithOffer(offer string) (string, error) {
 	// This code will be displayed to user, it is also the session ID
 	code, err := utils.GenerateCode(8)
 	if err != nil {
@@ -69,7 +48,7 @@ func (s *SessionService) CreateSessionWithOffer(offer string) (string, error) {
 	return code, nil
 }
 
-func (s *SessionService) UpdateAnswer(sessionID, answer string) error {
+func (s *SessionService) updateAnswer(sessionID, answer string) error {
 	sessionRef := s.ref.Child(sessionID)
 	updates := map[string]any{
 		"answer": answer,
@@ -80,7 +59,7 @@ func (s *SessionService) UpdateAnswer(sessionID, answer string) error {
 	return nil
 }
 
-func (s *SessionService) CheckForAnswer(ctx context.Context, sessionID string) (string, error) {
+func (s *SessionService) checkForAnswer(ctx context.Context, sessionID string) (string, error) {
 	// The other peer might not answer immediately so
 	// we will wait a bit before checking for first time
 	time.Sleep(time.Second * 5)
@@ -113,15 +92,15 @@ func (s *SessionService) CheckForAnswer(ctx context.Context, sessionID string) (
 	}
 
 	// Delete the session if no answer is received
-	if err := s.DeleteSession(sessionID); err != nil {
+	if err := s.deleteSession(sessionID); err != nil {
 		return "", fmt.Errorf("error delete session: %s", err.Error())
 	}
 
 	return "", fmt.Errorf("timeout waiting for answer")
 }
 
-// DeleteSession deletes a session by its ID
-func (s *SessionService) DeleteSession(sessionID string) error {
+// deleteSession deletes a session by its ID
+func (s *SessionService) deleteSession(sessionID string) error {
 	sessionRef := s.ref.Child(sessionID)
 	if err := sessionRef.Delete(s.client.ctx); err != nil {
 		return fmt.Errorf("error deleting session %s: %w", sessionID, err)
@@ -129,7 +108,7 @@ func (s *SessionService) DeleteSession(sessionID string) error {
 	return nil
 }
 
-func (s *SessionService) GetOffer(sessionID string) (string, error) {
+func (s *SessionService) getOffer(sessionID string) (string, error) {
 	// First check if the session exists at all
 	sessionRef := s.ref.Child(sessionID)
 

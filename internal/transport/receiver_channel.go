@@ -19,7 +19,7 @@ type ReceiverChannel struct {
 	dataChannel      *webrtc.DataChannel
 	dataProcessor    *processor.DataProcessor
 	metadataReceived bool // Track if metadata has been received
-	
+
 	// Progress tracking
 	totalBytes     uint64
 	bytesReceived  uint64
@@ -57,108 +57,7 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, des
 		})
 
 		r.dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
-			// Handle metadata
-			if !r.metadataReceived && bytes.HasPrefix(msg.Data, []byte("METADATA:")) {
-				metadata, err := r.processMetaData(msg.Data)
-				if err != nil {
-					log.Printf("Error handling metadata: %v", err)
-					doneOnce.Do(func() { close(doneCh) })
-					return
-				}
-
-				// Set up progress tracking with file size
-				r.totalBytes = uint64(metadata.Size)
-				r.bytesReceived = 0
-				r.fileMetadata = metadata
-
-				// Send initial progress
-				progressCh <- ProgressUpdate{
-					BytesSent:   0,
-					BytesTotal:  r.totalBytes,
-					Percentage:  0.0,
-					Throughput:  0.0,
-					ElapsedTime: 0,
-					MetaData:    *metadata,
-				}
-
-				// Prepare file for receiving with metadata
-				finalPath, err := r.dataProcessor.PrepareFileForReceiving(destPath, metadata)
-				if err != nil {
-					log.Printf("Error preparing file for receiving: %v", err)
-					doneOnce.Do(func() { close(doneCh) })
-					return
-				}
-
-				log.Printf("Ready to receive file to: %s", finalPath)
-				return
-			}
-
-			// Handle EOF
-			if string(msg.Data) == "EOF" {
-				// Finish receiving and get total bytes
-				err := r.processEOFSignal()
-				if err != nil {
-					log.Printf("Error processing EOF signal: %v", err)
-				}
-
-				// Send final progress
-				elapsed := time.Since(r.startTime)
-				avgThroughput := float64(r.bytesReceived) / elapsed.Seconds() / (1024 * 1024) // MB/s
-				update := ProgressUpdate{
-					BytesSent:   r.bytesReceived,
-					BytesTotal:  r.totalBytes,
-					Percentage:  100.0,
-					Throughput:  avgThroughput,
-					ElapsedTime: elapsed,
-				}
-				if r.fileMetadata != nil {
-					update.MetaData = *r.fileMetadata
-				}
-				progressCh <- update
-
-				// Close progress channel and signal completion
-				progressOnce.Do(func() { close(progressCh) })
-				doneOnce.Do(func() { close(doneCh) })
-				return
-			}
-
-			// Handle file data (only after metadata is received)
-			if !r.metadataReceived {
-				log.Printf("Received file data before metadata, ignoring")
-				return
-			}
-
-			// Write data using DataProcessor
-			err := r.dataProcessor.WriteData(msg.Data)
-			if err != nil {
-				log.Printf("Error writing data: %v", err)
-				return
-			}
-
-			// Update progress tracking
-			r.bytesReceived += uint64(len(msg.Data))
-
-			// Send progress update every second or when significant progress is made
-			now := time.Now()
-			if now.Sub(r.lastUpdateTime) >= time.Second || r.bytesReceived == r.totalBytes {
-				elapsed := now.Sub(r.startTime)
-				percentage := float64(r.bytesReceived) / float64(r.totalBytes) * 100.0
-				throughput := float64(r.bytesReceived) / elapsed.Seconds() / (1024 * 1024) // MB/s
-
-				update := ProgressUpdate{
-					BytesSent:   r.bytesReceived,
-					BytesTotal:  r.totalBytes,
-					Percentage:  percentage,
-					Throughput:  throughput,
-					ElapsedTime: elapsed,
-				}
-				if r.fileMetadata != nil {
-					update.MetaData = *r.fileMetadata
-				}
-				progressCh <- update
-
-				r.lastUpdateTime = now
-			}
+			r.handleMessage(msg, destPath, doneCh, progressCh, &doneOnce, &progressOnce)
 		})
 
 		r.dataChannel.OnClose(func() {
@@ -171,7 +70,7 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, des
 
 		r.dataChannel.OnError(func(err error) {
 			log.Printf("File transfer data channel error: %v", err)
-			// Clean up any open files
+			// Clean up any open files. //TODO: clean up partially written file
 			r.dataProcessor.Close()
 			// Close progress channel if not already closed
 			progressOnce.Do(func() { close(progressCh) })
@@ -204,13 +103,138 @@ func (r *ReceiverChannel) processMetaData(msg []byte) (*processor.FileMetadata, 
 	return metadata, nil
 }
 
-func (r *ReceiverChannel) processEOFSignal() error {
+// MessageHandlerContext contains shared context for message handlers
+type MessageHandlerContext struct {
+	destPath     string
+	doneCh       chan struct{}
+	progressCh   chan ProgressUpdate
+	doneOnce     *sync.Once
+	progressOnce *sync.Once
+}
+
+// handleMessage dispatches messages to appropriate handlers based on type
+func (r *ReceiverChannel) handleMessage(msg webrtc.DataChannelMessage, destPath string, doneCh chan struct{}, progressCh chan ProgressUpdate, doneOnce *sync.Once, progressOnce *sync.Once) {
+	ctx := &MessageHandlerContext{
+		destPath:     destPath,
+		doneCh:       doneCh,
+		progressCh:   progressCh,
+		doneOnce:     doneOnce,
+		progressOnce: progressOnce,
+	}
+
+	// Determine message type and dispatch to appropriate handler
+	switch {
+	case !r.metadataReceived && bytes.HasPrefix(msg.Data, []byte("METADATA:")):
+		r.handleMetadataMessage(msg, ctx)
+	case string(msg.Data) == "EOF":
+		r.handleEOFMessage(msg, ctx)
+	default:
+		r.handleFileDataMessage(msg, ctx)
+	}
+}
+
+// handleMetadataMessage processes metadata messages
+func (r *ReceiverChannel) handleMetadataMessage(msg webrtc.DataChannelMessage, ctx *MessageHandlerContext) {
+	metadata, err := r.processMetaData(msg.Data)
+	if err != nil {
+		log.Printf("Error handling metadata: %v", err)
+		ctx.doneOnce.Do(func() { close(ctx.doneCh) })
+		return
+	}
+
+	// Set up progress tracking with file size
+	r.totalBytes = uint64(metadata.Size)
+	r.bytesReceived = 0
+	r.fileMetadata = metadata
+
+	// Send initial progress
+	ctx.progressCh <- ProgressUpdate{
+		BytesSent:   0,
+		BytesTotal:  r.totalBytes,
+		Percentage:  0.0,
+		Throughput:  0.0,
+		ElapsedTime: 0,
+		MetaData:    *metadata,
+	}
+
+	// Prepare file for receiving with metadata
+	finalPath, err := r.dataProcessor.PrepareFileForReceiving(ctx.destPath, metadata)
+	if err != nil {
+		log.Printf("Error preparing file for receiving: %v", err)
+		ctx.doneOnce.Do(func() { close(ctx.doneCh) })
+		return
+	}
+
+	log.Printf("Ready to receive file to: %s", finalPath)
+}
+
+// handleEOFMessage processes EOF messages
+func (r *ReceiverChannel) handleEOFMessage(_ webrtc.DataChannelMessage, ctx *MessageHandlerContext) {
+	// Finish receiving and get total bytes
 	totalBytes, err := r.dataProcessor.FinishReceiving()
 	if err != nil {
-		return fmt.Errorf("error finishing file reception: %w", err)
+		log.Printf("Error processing EOF signal: %v", err)
 	}
 
 	log.Printf("File transfer complete: %d bytes received", totalBytes)
 
-	return nil
+	// Send final progress
+	elapsed := time.Since(r.startTime)
+	avgThroughput := float64(r.bytesReceived) / elapsed.Seconds() / (1024 * 1024) // MB/s
+	update := ProgressUpdate{
+		BytesSent:   r.bytesReceived,
+		BytesTotal:  r.totalBytes,
+		Percentage:  100.0,
+		Throughput:  avgThroughput,
+		ElapsedTime: elapsed,
+	}
+	if r.fileMetadata != nil {
+		update.MetaData = *r.fileMetadata
+	}
+	ctx.progressCh <- update
+
+	// Close progress channel and signal completion
+	ctx.progressOnce.Do(func() { close(ctx.progressCh) })
+	ctx.doneOnce.Do(func() { close(ctx.doneCh) })
+}
+
+// handleFileDataMessage processes file data messages
+func (r *ReceiverChannel) handleFileDataMessage(msg webrtc.DataChannelMessage, ctx *MessageHandlerContext) {
+	// Handle file data (only after metadata is received)
+	if !r.metadataReceived {
+		log.Printf("Received file data before metadata, ignoring")
+		return
+	}
+
+	// Write data using DataProcessor
+	err := r.dataProcessor.WriteData(msg.Data)
+	if err != nil {
+		log.Printf("Error writing data: %v", err)
+		return
+	}
+
+	// Update progress tracking
+	r.bytesReceived += uint64(len(msg.Data))
+
+	// Send progress update every second or when significant progress is made
+	now := time.Now()
+	if now.Sub(r.lastUpdateTime) >= time.Second || r.bytesReceived == r.totalBytes {
+		elapsed := now.Sub(r.startTime)
+		percentage := float64(r.bytesReceived) / float64(r.totalBytes) * 100.0
+		throughput := float64(r.bytesReceived) / elapsed.Seconds() / (1024 * 1024) // MB/s
+
+		update := ProgressUpdate{
+			BytesSent:   r.bytesReceived,
+			BytesTotal:  r.totalBytes,
+			Percentage:  percentage,
+			Throughput:  throughput,
+			ElapsedTime: elapsed,
+		}
+		if r.fileMetadata != nil {
+			update.MetaData = *r.fileMetadata
+		}
+		ctx.progressCh <- update
+
+		r.lastUpdateTime = now
+	}
 }
