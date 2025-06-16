@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
+	"path/filepath"
 
 	"yapfs/internal/config"
 	"yapfs/internal/signalling"
@@ -55,7 +57,7 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 		return fmt.Errorf("file does not exist: %s", opts.FilePath)
 	}
 
-	s.ui.ShowMessage(fmt.Sprintf("Preparing to send file: %s", opts.FilePath))
+	log.Printf("Preparing to send file: %s", opts.FilePath)
 
 	// Create peer connection
 	peerConn, err := s.peerService.CreatePeerConnection()
@@ -64,10 +66,10 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	}
 	defer func() {
 		if err := s.peerService.Close(peerConn); err != nil {
-			s.ui.ShowMessage(fmt.Sprintf("Error closing peer connection: %v", err))
+			log.Printf("Error closing peer connection: %v", err)
 		}
 		if err := s.dataChannelService.Close(); err != nil {
-			s.ui.ShowMessage(fmt.Sprintf("Error closing data channel service: %v", err))
+			log.Printf("Error closing data channel service: %v", err)
 		}
 	}()
 
@@ -85,17 +87,39 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	if err != nil {
 		return fmt.Errorf("failed during signalling process: %w", err)
 	}
-	
-	doneCh, err := s.dataChannelService.SetupFileSender(ctx, opts.FilePath)
+
+	// Setup file sender with progress
+	doneCh, progressCh, err := s.dataChannelService.SetupFileSenderWithProgress(ctx, opts.FilePath)
 	if err != nil {
 		return fmt.Errorf("failed to setup file sender: %w", err)
 	}
+
+	// Create progress UI
+	progressUI := ui.NewProgressUI()
+	filename := filepath.Base(opts.FilePath)
 	
 	// Show ready message
 	s.ui.ShowMessage("Sender is ready. File will start sending when the data channel opens.")
 
+	// Start progress tracking
+	go func() {
+		var started bool
+		for update := range progressCh {
+			if !started {
+				progressUI.StartProgress(filename, update.BytesTotal)
+				started = true
+			}
+			progressUI.UpdateProgress(update)
+			
+			// Show final summary when transfer completes
+			if update.Percentage >= 100.0 {
+				progressUI.CompleteProgress()
+				progressUI.ShowTransferSummary(update)
+			}
+		}
+	}()
+
 	// Wait for transfer completion
 	<-doneCh
-	s.ui.ShowMessage("File transfer completed successfully!")
 	return nil
 }

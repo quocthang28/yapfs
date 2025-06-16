@@ -2,6 +2,8 @@ package transport
 
 import (
 	"bytes"
+	"fmt"
+	"io"
 	"log"
 	"sync"
 
@@ -13,9 +15,9 @@ import (
 
 // ReceiverChannel manages data channel operations for receiving files
 type ReceiverChannel struct {
-	config         *config.Config
-	dataChannel    *webrtc.DataChannel
-	dataProcessor  *processor.DataProcessor
+	config           *config.Config
+	dataChannel      *webrtc.DataChannel
+	dataProcessor    *processor.DataProcessor
 	metadataReceived bool // Track if metadata has been received
 }
 
@@ -30,6 +32,11 @@ func NewReceiverChannel(cfg *config.Config) *ReceiverChannel {
 
 // SetupFileReceiver sets up handlers for receiving files and returns a completion channel
 func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, destPath string) (<-chan struct{}, error) {
+	return r.setupFileReceiver(peerConn, destPath, nil)
+}
+
+// setupFileReceiver is the internal implementation for receiving files
+func (r *ReceiverChannel) setupFileReceiver(peerConn *webrtc.PeerConnection, destPath string, _ io.Writer) (<-chan struct{}, error) {
 	doneCh := make(chan struct{})
 	var doneOnce sync.Once // Ensure doneCh is closed only once
 
@@ -43,40 +50,34 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, des
 		})
 
 		r.dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
-			// Handle metadata first
+			// Handle metadata
 			if !r.metadataReceived && bytes.HasPrefix(msg.Data, []byte("METADATA:")) {
-				metadataBytes := msg.Data[9:] // Remove "METADATA:" prefix
-				metadata, err := r.dataProcessor.DecodeMetadata(metadataBytes)
+				metadata, err := r.processMetaData(msg.Data)
 				if err != nil {
-					log.Printf("Error decoding metadata: %v", err)
+					log.Printf("Error handling metadata: %v", err)
 					doneOnce.Do(func() { close(doneCh) })
+
 					return
 				}
-
-				log.Printf("Received metadata: %s (size: %d bytes, type: %s)", 
-					metadata.Name, metadata.Size, metadata.MimeType)
 
 				// Prepare file for receiving with metadata
 				finalPath, err := r.dataProcessor.PrepareFileForReceiving(destPath, metadata)
 				if err != nil {
 					log.Printf("Error preparing file for receiving: %v", err)
 					doneOnce.Do(func() { close(doneCh) })
+
 					return
 				}
 
 				log.Printf("Ready to receive file to: %s", finalPath)
-				r.metadataReceived = true
-				return
 			}
 
 			// Handle EOF
 			if string(msg.Data) == "EOF" {
 				// Finish receiving and get total bytes
-				totalBytes, err := r.dataProcessor.FinishReceiving()
+				err := r.processEOFSignal()
 				if err != nil {
-					log.Printf("Error finishing file reception: %v", err)
-				} else {
-					log.Printf("File transfer complete: %d bytes received", totalBytes)
+					log.Printf("Error processing EOF singal: %v", err)
 				}
 
 				// Signal completion
@@ -119,5 +120,31 @@ func (r *ReceiverChannel) Close() error {
 	if r.dataProcessor != nil {
 		return r.dataProcessor.Close()
 	}
+	return nil
+}
+
+func (r *ReceiverChannel) processMetaData(msg []byte) (*processor.FileMetadata, error) {
+	metadataBytes := msg[9:] // Remove "METADATA:" prefix
+	metadata, err := r.dataProcessor.DecodeMetadata(metadataBytes)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding metadata: %w", err)
+	}
+
+	log.Printf("Received metadata: %s (size: %d bytes, type: %s)",
+		metadata.Name, metadata.Size, metadata.MimeType)
+
+	r.metadataReceived = true
+
+	return metadata, nil
+}
+
+func (r *ReceiverChannel) processEOFSignal() error {
+	totalBytes, err := r.dataProcessor.FinishReceiving()
+	if err != nil {
+		return fmt.Errorf("error finishing file reception: %w", err)
+	}
+
+	log.Printf("File transfer complete: %d bytes received", totalBytes)
+
 	return nil
 }

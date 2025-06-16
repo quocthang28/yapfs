@@ -72,7 +72,7 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	// Setup connection state handler
 	r.peerService.SetupConnectionStateHandler(peerConn, "receiver")
 
-	// Prompt the user to input code
+	// Prompt the user to input code (session ID)
 	code, err := r.ui.InputCode()
 	if err != nil {
 		return fmt.Errorf("failed to get code from user: %w", err)
@@ -84,7 +84,7 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 		return fmt.Errorf("failed during signalling process: %w", err)
 	}
 
-	// Setup file receiver
+	// Setup file receiver without progress first (we'll enhance this later when metadata is available)
 	doneCh, err := r.dataChannelService.SetupFileReceiver(peerConn, opts.DestPath)
 	if err != nil {
 		return fmt.Errorf("failed to setup file receiver data channel handler: %w", err)
@@ -94,6 +94,6 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 
 	// Wait for transfer completion
 	<-doneCh
-	r.ui.ShowMessage("File transfer completed successfully")
+	r.ui.ShowMessage("File transfer completed successfully!")
 	return nil
 }

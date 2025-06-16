@@ -64,6 +64,8 @@ func (s *SessionService) CreateSessionWithOffer(offer string) (string, error) {
 		return "", fmt.Errorf("error creating session %s", err)
 	}
 
+	log.Println("Session create succesfully")
+
 	return code, nil
 }
 
@@ -81,7 +83,9 @@ func (s *SessionService) UpdateAnswer(sessionID, answer string) error {
 func (s *SessionService) CheckForAnswer(ctx context.Context, sessionID string) (string, error) {
 	// The other peer might not answer immediately so
 	// we will wait a bit before checking for first time
-	time.Sleep(time.Second * 2)
+	time.Sleep(time.Second * 5)
+	log.Printf("Waiting for receiver to answer...")
+
 	for i := 0; i < 10; i++ {
 		// Refresh session data from storage
 		var sessionData struct {

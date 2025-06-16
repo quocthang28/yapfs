@@ -3,6 +3,7 @@ package signalling
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 
 	"yapfs/internal/config"
@@ -49,26 +50,25 @@ func (s *SignalingService) StartSenderSignallingProcess(ctx context.Context, pee
 	if finalOffer == nil {
 		return fmt.Errorf("local description is nil after ICE gathering")
 	}
-	
+
 	// Encode offer SDP
 	encodedOffer, err := utils.EncodeSessionDescription(*finalOffer)
 	if err != nil {
 		return fmt.Errorf("failed to encode offer SDP: %w", err)
 	}
 
-	// Create session with offer
+	// Upload session with offer to Firebase
 	sessionID, err := s.sessionService.CreateSessionWithOffer(encodedOffer)
 	if err != nil {
 		return fmt.Errorf("failed to create session with offer: %w", err)
 	}
 
-	fmt.Printf("Session created with ID: %s\n", sessionID)
+	log.Printf("Share this code with the receiver: %s\n", sessionID)
 
 	// Wait for answer from remote peer
-	fmt.Printf("Waiting for receiver to answer...")
 	answer, err := s.sessionService.CheckForAnswer(ctx, sessionID)
 	if err != nil {
-		fmt.Printf("Error occurred: %s\n", err)
+		log.Printf("Error occurred: %s\n", err)
 		return err
 	}
 
