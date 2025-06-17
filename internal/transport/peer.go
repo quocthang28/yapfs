@@ -122,7 +122,7 @@ func DefaultStateHandler(state webrtc.PeerConnectionState, role string) error {
 }
 
 // CreateDefaultStateHandler returns a state handler that propagates errors instead of exiting
-func CreateDefaultStateHandler(onError func(error), onConnected func()) ConnectionStateCallback {
+func CreateDefaultStateHandler(onError func(error), onConnected func(), onClosed func()) ConnectionStateCallback {
 	return func(state webrtc.PeerConnectionState, role string) error {
 		switch state {
 		case webrtc.PeerConnectionStateFailed:
@@ -139,6 +139,9 @@ func CreateDefaultStateHandler(onError func(error), onConnected func()) Connecti
 			return nil
 		case webrtc.PeerConnectionStateClosed:
 			log.Printf("Peer connection closed gracefully (%s)", role)
+			if onClosed != nil {
+				onClosed()
+			}
 			return nil
 		default:
 			return nil

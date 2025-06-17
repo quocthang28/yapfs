@@ -70,7 +70,6 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, des
 
 		r.dataChannel.OnError(func(err error) {
 			log.Printf("File transfer data channel error: %v", err)
-			// Clean up any open files. //TODO: clean up partially written file
 			r.dataProcessor.Close()
 			// Close progress channel if not already closed
 			progressOnce.Do(func() { close(progressCh) })
@@ -216,9 +215,9 @@ func (r *ReceiverChannel) handleFileDataMessage(msg webrtc.DataChannelMessage, c
 	// Update progress tracking
 	r.bytesReceived += uint64(len(msg.Data))
 
-	// Send progress update every second or when significant progress is made
+	// Send progress update every second but not when transfer is complete (EOF handles that)
 	now := time.Now()
-	if now.Sub(r.lastUpdateTime) >= time.Second || r.bytesReceived == r.totalBytes {
+	if now.Sub(r.lastUpdateTime) >= time.Second && r.bytesReceived < r.totalBytes {
 		elapsed := now.Sub(r.startTime)
 		percentage := float64(r.bytesReceived) / float64(r.totalBytes) * 100.0
 		throughput := float64(r.bytesReceived) / elapsed.Seconds() / (1024 * 1024) // MB/s

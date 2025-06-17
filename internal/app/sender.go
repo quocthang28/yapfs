@@ -50,13 +50,25 @@ func NewSenderApp(
 func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	log.Printf("Preparing to send file: %s", opts.FilePath)
 
-	// Create peer connection with error handling callback
+	// Single exit channel for all termination conditions
+	exitCh := make(chan error, 1)
+
+	// Create peer connection with state handler
 	stateHandler := transport.CreateDefaultStateHandler(
 		func(err error) {
 			log.Printf("Peer connection error: %v", err)
+			select {
+			case exitCh <- err:
+			default:
+			}
 		},
+		func() {},
 		func() {
-			log.Printf("Peer connection established successfully")
+			// Connection closed - signal app exit
+			select {
+			case exitCh <- nil:
+			default:
+			}
 		},
 	)
 
@@ -64,29 +76,17 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	if err != nil {
 		return fmt.Errorf("failed to create peer connection: %w", err)
 	}
-	defer func() {
+
+	// Single cleanup function
+	cleanup := func(sessionID string) {
 		if err := s.dataChannelService.Close(); err != nil {
 			log.Printf("Error closing data channel service: %v", err)
 		}
+
 		if err := peerConn.Close(); err != nil {
 			log.Printf("Error closing peer connection: %v", err)
 		}
-	}()
 
-	// Create data channel for file transfer BEFORE creating the offer
-	err = s.dataChannelService.CreateFileSenderDataChannel(peerConn.PeerConnection, "fileTransfer")
-	if err != nil {
-		return fmt.Errorf("failed to create file sender data channel: %w", err)
-	}
-
-	// Start signalling process
-	sessionID, err := s.signalingService.StartSenderSignallingProcess(ctx, peerConn.PeerConnection)
-	if err != nil {
-		return fmt.Errorf("failed during signalling process: %w", err)
-	}
-
-	// Ensure Firebase session is cleared regardless of how the function exits
-	defer func() {
 		if sessionID != "" {
 			if err := s.signalingService.ClearSession(sessionID); err != nil {
 				log.Printf("Warning: Failed to clear Firebase session: %v", err)
@@ -94,45 +94,62 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 				log.Printf("Firebase session cleared successfully")
 			}
 		}
-	}()
+	}
+
+	// Create data channel for file transfer BEFORE creating the offer
+	err = s.dataChannelService.CreateFileSenderDataChannel(peerConn.PeerConnection, "fileTransfer")
+	if err != nil {
+		cleanup("")
+		return fmt.Errorf("failed to create file sender data channel: %w", err)
+	}
+
+	// Start signalling process
+	sessionID, err := s.signalingService.StartSenderSignallingProcess(ctx, peerConn.PeerConnection)
+	if err != nil {
+		cleanup("")
+		return fmt.Errorf("failed during signalling process: %w", err)
+	}
 
 	// Setup file sender with progress
 	doneCh, progressCh, err := s.dataChannelService.SetupFileSender(ctx, opts.FilePath)
 	if err != nil {
+		cleanup(sessionID)
 		return fmt.Errorf("failed to setup file sender: %w", err)
 	}
 
-	// Create progress UI
+	// Start updating progress on UI
+	go s.updateProgress(opts, progressCh)
+
+	// Wait for any exit condition
+	var exitErr error
+	select {
+	case <-doneCh:
+		// Transfer completed successfully
+	case <-ctx.Done():
+		exitErr = ctx.Err()
+	case exitErr = <-exitCh:
+		// Connection closed or error
+	}
+
+	cleanup(sessionID)
+	return exitErr
+}
+
+func (s *SenderApp) updateProgress(opts *SenderOptions, progressCh <-chan transport.ProgressUpdate) {
 	progressUI := ui.NewProgressUI()
 	filename := filepath.Base(opts.FilePath)
 
-	// Show ready message
-	s.ui.ShowMessage("Sender is ready. File will start sending when the data channel opens.")
-
-	// Start progress tracking
-	go func() {
-		var started bool
-		for update := range progressCh {
-			if !started {
-				progressUI.StartProgress(filename, update.BytesTotal)
-				started = true
-			}
-			progressUI.UpdateProgress(update)
-
-			// Show final summary when transfer completes
-			if update.Percentage >= 100.0 {
-				progressUI.CompleteProgress()
-				progressUI.ShowTransferSummary(update)
-			}
+	var started bool
+	for update := range progressCh {
+		if !started {
+			progressUI.StartProgressSending(filename, update.BytesTotal)
+			started = true
 		}
-	}()
+		progressUI.UpdateProgress(update)
 
-	// Wait for transfer completion
-	select {
-	case <-doneCh:
-	case <-ctx.Done():
-		return ctx.Err()
+		// Complete progress when transfer finishes
+		if update.Percentage >= 100.0 {
+			progressUI.CompleteProgress()
+		}
 	}
-
-	return nil
 }

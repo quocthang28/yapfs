@@ -242,7 +242,7 @@ func (s *SenderChannel) sendEOFPhase(ctx *FileTransferContext) {
 // updateProgress sends progress updates at appropriate intervals
 func (s *SenderChannel) updateProgress(ctx *FileTransferContext) {
 	now := time.Now()
-	if now.Sub(ctx.lastProgressTime) >= time.Second || ctx.bytesSent == ctx.totalBytes {
+	if now.Sub(ctx.lastProgressTime) >= time.Second && ctx.bytesSent < ctx.totalBytes {
 		elapsed := now.Sub(ctx.startTime)
 		percentage := float64(ctx.bytesSent) / float64(ctx.totalBytes) * 100.0
 		throughput := float64(ctx.bytesSent) / elapsed.Seconds() / (1024 * 1024) // MB/s

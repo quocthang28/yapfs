@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"path/filepath"
 
 	"yapfs/internal/config"
 	"yapfs/internal/signalling"
@@ -55,13 +54,25 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 
 	r.ui.ShowMessage(fmt.Sprintf("Preparing to receive file to: %s", opts.DestPath))
 
-	// Create peer connection with error handling callback
+	// Single exit channel for all termination conditions
+	exitCh := make(chan error, 1)
+
+	// Create peer connection with state handler
 	stateHandler := transport.CreateDefaultStateHandler(
 		func(err error) {
 			log.Printf("Peer connection error: %v", err)
+			select {
+			case exitCh <- err:
+			default:
+			}
 		},
+		func() {},
 		func() {
-			log.Printf("Peer connection established successfully")
+			// Connection closed - signal app exit
+			select {
+			case exitCh <- nil:
+			default:
+			}
 		},
 	)
 
@@ -69,29 +80,17 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	if err != nil {
 		return fmt.Errorf("failed to create peer connection: %w", err)
 	}
-	defer func() {
+
+	// Single cleanup function
+	cleanup := func(code string) {
 		if err := r.dataChannelService.Close(); err != nil {
 			r.ui.ShowMessage(fmt.Sprintf("Error closing data channel service: %v", err))
 		}
+
 		if err := peerConn.Close(); err != nil {
 			r.ui.ShowMessage(fmt.Sprintf("Error closing peer connection: %v", err))
 		}
-	}()
 
-	// Prompt the user to input code (session ID)
-	code, err := r.ui.InputCode(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get code from user: %w", err)
-	}
-
-	// Start signalling process
-	err = r.signalingService.StartReceiverSignallingProcess(ctx, peerConn.PeerConnection, code)
-	if err != nil {
-		return fmt.Errorf("failed during signalling process: %w", err)
-	}
-
-	// Ensure Firebase session is cleared regardless of how the function exits
-	defer func() {
 		if code != "" {
 			if err := r.signalingService.ClearSession(code); err != nil {
 				log.Printf("Warning: Failed to clear Firebase session: %v", err)
@@ -99,50 +98,61 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 				log.Printf("Firebase session cleared successfully")
 			}
 		}
-	}()
+	}
+
+	// Prompt the user to input code (session ID)
+	code, err := r.ui.InputCode(ctx)
+	if err != nil {
+		cleanup("")
+		return fmt.Errorf("failed to get code from user: %w", err)
+	}
+
+	// Start signalling process
+	err = r.signalingService.StartReceiverSignallingProcess(ctx, peerConn.PeerConnection, code)
+	if err != nil {
+		cleanup(code)
+		return fmt.Errorf("failed during signalling process: %w", err)
+	}
 
 	// Setup file receiver with progress tracking
 	doneCh, progressCh, err := r.dataChannelService.SetupFileReceiver(peerConn.PeerConnection, opts.DestPath)
 	if err != nil {
+		cleanup(code)
 		return fmt.Errorf("failed to setup file receiver data channel handler: %w", err)
 	}
 
-	r.ui.ShowMessage("Receiver is ready. Waiting for file transfer...")
+	// Start updating progress on UI
+	go r.updateProgress(progressCh)
 
-	// Create progress UI
-	progressUI := ui.NewProgressUI()
-
-	// Start progress tracking
-	go func() {
-		var started bool
-		for update := range progressCh {
-			if !started {
-				// Get filename from metadata when available
-				var filename string
-				if update.MetaData.Name != "" {
-					filename = update.MetaData.Name
-				} else {
-					filename = filepath.Base(opts.DestPath)
-				}
-				progressUI.StartProgress(filename, update.BytesTotal)
-				started = true
-			}
-			progressUI.UpdateProgress(update)
-
-			// Show final summary when transfer completes
-			if update.Percentage >= 100.0 {
-				progressUI.CompleteProgress()
-				progressUI.ShowTransferSummary(update)
-			}
-		}
-	}()
-
-	// Wait for transfer completion
+	// Wait for any exit condition
+	var exitErr error
 	select {
 	case <-doneCh:
+		// Transfer completed successfully
 	case <-ctx.Done():
-		return ctx.Err()
+		exitErr = ctx.Err()
+	case exitErr = <-exitCh:
+		// Connection closed or error
 	}
 
-	return nil
+	cleanup(code)
+	return exitErr
+}
+
+func (r *ReceiverApp) updateProgress(progressCh <-chan transport.ProgressUpdate) {
+	progressUI := ui.NewProgressUI()
+
+	var started bool
+	for update := range progressCh {
+		if !started {
+			progressUI.StartProgressReceiving(update.MetaData.Name, update.BytesTotal)
+			started = true
+		}
+		progressUI.UpdateProgress(update)
+
+		// Complete progress when transfer finishes
+		if update.Percentage >= 100.0 {
+			progressUI.CompleteProgress()
+		}
+	}
 }
