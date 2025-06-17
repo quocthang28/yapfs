@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+
 	"github.com/pion/webrtc/v4"
 )
 
@@ -24,7 +25,7 @@ type WebRTCConfig struct {
 	ICEServers                 []webrtc.ICEServer `json:"ice_servers"`
 	BufferedAmountLowThreshold uint64             `json:"buffered_amount_low_threshold"`
 	MaxBufferedAmount          uint64             `json:"max_buffered_amount"`
-	PacketSize                 int                `json:"packet_size"`
+	ChunkSize                  int                `json:"chunk_size"`
 }
 
 // FirebaseConfig holds Firebase client configuration
@@ -45,7 +46,7 @@ func NewDefaultConfig() *Config {
 			},
 			BufferedAmountLowThreshold: 512 * 1024,  // 512 KB
 			MaxBufferedAmount:          1024 * 1024, // 1 MB
-			PacketSize:                 1024,        // 1 KB packets
+			ChunkSize:                  1024,        // 1 KB packets
 		},
 		Firebase: FirebaseConfig{
 			ProjectID:       "",
@@ -60,7 +61,7 @@ func (c *Config) Validate() error {
 	if c.WebRTC.BufferedAmountLowThreshold >= c.WebRTC.MaxBufferedAmount {
 		return ErrInvalidBufferConfig
 	}
-	if c.WebRTC.PacketSize <= 0 {
+	if c.WebRTC.ChunkSize <= 0 {
 		return ErrInvalidPacketSize
 	}
 	if c.Firebase.CredentialsPath == "" {

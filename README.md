@@ -43,7 +43,7 @@ YAPFS supports configuration via JSON files. See `example-config.json` for a com
   - Default: `[{"urls": ["stun:stun.l.google.com:19302"]}]`
   - Multiple servers can be specified for redundancy
 
-- **`packet_size`** - Size of each file chunk in bytes
+- **`chunk_size`** - Size of each file chunk in bytes
   - Default: `1024` (1 KB)
   - Smaller values reduce memory usage but may decrease throughput
   - Range: 512-8192 bytes recommended

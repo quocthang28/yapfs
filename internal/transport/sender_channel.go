@@ -50,10 +50,20 @@ func (s *SenderChannel) SetupFileSender(ctx context.Context, filePath string) (<
 	if s.dataChannel == nil {
 		return nil, nil, fmt.Errorf("data channel not created, call CreateFileSenderDataChannel first")
 	}
-	sendMoreCh := make(chan struct{}, 3) // Buffer size 3 to handle multiple low threshold events
+
+	// Flow control channel: signals when WebRTC buffer has space for more data
+	// Buffered (size 3) to handle multiple OnBufferedAmountLow events without blocking
+	sendMoreCh := make(chan struct{}, 3)
+	
+	// Completion signal channel: closed when file transfer finishes (success or error)
 	doneCh := make(chan struct{})
-	progressCh := make(chan ProgressUpdate, 5) // Buffer progress updates
-	var doneOnce sync.Once                     // Ensure doneCh is closed only once
+	
+	// Progress updates channel: sends transfer statistics to UI layer
+	// Buffered (size 5) to prevent blocking on progress reporting
+	progressCh := make(chan ProgressUpdate, 5)
+	
+	// Ensures doneCh is closed exactly once, preventing panic from multiple close attempts
+	var doneOnce sync.Once
 
 	// Prepare file for sending
 	err := s.dataProcessor.PrepareFileForSending(filePath)
@@ -150,7 +160,7 @@ func (s *SenderChannel) sendMetadataPhase(ctx *FileTransferContext) error {
 // sendFileDataPhase handles the main file data transfer loop
 func (s *SenderChannel) sendFileDataPhase(ctx *FileTransferContext) {
 	// Start file transfer
-	dataCh, errCh := s.dataProcessor.StartReadingFile(s.config.WebRTC.PacketSize)
+	dataCh, errCh := s.dataProcessor.StartReadingFile(s.config.WebRTC.ChunkSize)
 	if dataCh == nil || errCh == nil {
 		log.Printf("No file prepared for transfer")
 		ctx.doneOnce.Do(func() { close(ctx.doneCh) })
@@ -162,7 +172,7 @@ func (s *SenderChannel) sendFileDataPhase(ctx *FileTransferContext) {
 		select {
 		case chunk, ok := <-dataCh:
 			if !ok {
-				// Channel closed unexpectedly, TODO: clean up partially written file
+				// Channel closed unexpectedly
 				log.Printf("Data channel closed unexpectedly")
 				ctx.doneOnce.Do(func() { close(ctx.doneCh) })
 				return

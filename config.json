@@ -7,7 +7,7 @@
     ],
     "buffered_amount_low_threshold": 524288,
     "max_buffered_amount": 1048576,
-    "packet_size": 1024
+    "chunk_size": 1024
   },
   "firebase": {
     "project_id": "yapfs-4c839",
