@@ -30,22 +30,26 @@ func (c *ConsoleUI) InputCode(ctx context.Context) (string, error) {
 	scanner := bufio.NewScanner(os.Stdin)
 
 	for {
-		// Check if context is cancelled
+		fmt.Printf("Enter code from sender: ")
+		
+		// Create a channel to receive the input
+		inputCh := make(chan string, 1)
+		go func() {
+			if scanner.Scan() {
+				inputCh <- strings.TrimSpace(scanner.Text())
+			}
+		}()
+
+		// Wait for either input or context cancellation
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
-		default:
+		case code := <-inputCh:
+			if utils.IsValidCode(code) {
+				return code, nil
+			}
+			fmt.Printf("Invalid code. Please enter again.\n")
 		}
-
-		fmt.Printf("Enter code from sender: ")
-		scanner.Scan()
-		code := strings.TrimSpace(scanner.Text())
-
-		if utils.IsValidCode(code) {
-			return code, nil
-		}
-
-		fmt.Printf("Invalid code. Please enter again.\n")
 	}
 }
 
