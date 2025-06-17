@@ -44,17 +44,17 @@ YAPFS supports configuration via JSON files. See `example-config.json` for a com
   - Multiple servers can be specified for redundancy
 
 - **`chunk_size`** - Size of each file chunk in bytes
-  - Default: `1024` (1 KB)
-  - Smaller values reduce memory usage but may decrease throughput
-  - Range: 512-8192 bytes recommended
+  - Default: `32768` (32 KB)
+  - Optimized for WebRTC compatibility and performance
+  - Range: 16KB-64KB recommended for best throughput
 
 - **`max_buffered_amount`** - Maximum WebRTC send buffer size in bytes
-  - Default: `1048576` (1 MB)
+  - Default: `2097152` (2 MB)
   - Higher values allow more data buffering but use more memory
   - Triggers flow control when reached to prevent overwhelming the connection
 
 - **`buffered_amount_low_threshold`** - Resume transmission threshold in bytes
-  - Default: `524288` (512 KB)
+  - Default: `1048576` (1 MB)
   - Must be less than `max_buffered_amount`
   - Flow control resumes sending when buffer drops below this level
 

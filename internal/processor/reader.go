@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"log"
@@ -28,9 +29,10 @@ type DataChunk struct {
 
 // fileReader wraps an open file for sending (internal to ReaderService)
 type fileReader struct {
-	file     *os.File
-	fileInfo os.FileInfo
-	filePath string
+	file       *os.File
+	fileInfo   os.FileInfo
+	filePath   string
+	bufReader  *bufio.Reader
 }
 
 // prepareFileForReading opens file and validates it's ready for reading
@@ -52,9 +54,10 @@ func (r *readerService) prepareFileForReading(filePath string) (*fileReader, err
 		filePath, stat.Size(), utils.FormatFileSize(stat.Size()))
 
 	reader := &fileReader{
-		file:     file,
-		fileInfo: stat,
-		filePath: filePath,
+		file:      file,
+		fileInfo:  stat,
+		filePath:  filePath,
+		bufReader: bufio.NewReaderSize(file, 256*1024), // 256KB buffer for optimal I/O
 	}
 
 	return reader, nil
@@ -73,7 +76,7 @@ func (r *readerService) startReading(reader *fileReader, chunkSize int) (<-chan 
 		// Read and send file chunks
 		buffer := make([]byte, chunkSize)
 		for {
-			n, err := reader.file.Read(buffer)
+			n, err := reader.bufReader.Read(buffer)
 			if err == io.EOF {
 				// Send EOF marker
 				dataCh <- DataChunk{Data: nil, EOF: true}

@@ -5,9 +5,9 @@
         "urls": ["stun:stun.l.google.com:19302"]
       }
     ],
-    "buffered_amount_low_threshold": 524288,
-    "max_buffered_amount": 1048576,
-    "chunk_size": 1024
+    "buffered_amount_low_threshold": 1048576,
+    "max_buffered_amount": 2097152,
+    "chunk_size": 32768
   },
   "firebase": {
     "project_id": "your-firebase-project-id",
