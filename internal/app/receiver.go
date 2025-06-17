@@ -79,7 +79,7 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	}()
 
 	// Prompt the user to input code (session ID)
-	code, err := r.ui.InputCode()
+	code, err := r.ui.InputCode(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get code from user: %w", err)
 	}

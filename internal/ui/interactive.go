@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -25,10 +26,17 @@ func (c *ConsoleUI) ShowMessage(message string) {
 }
 
 // InputCode prompts user to input an 8-character alphanumeric code with validation
-func (c *ConsoleUI) InputCode() (string, error) {
+func (c *ConsoleUI) InputCode(ctx context.Context) (string, error) {
 	scanner := bufio.NewScanner(os.Stdin)
 
 	for {
+		// Check if context is cancelled
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		default:
+		}
+
 		fmt.Printf("Enter code from sender: ")
 		scanner.Scan()
 		code := strings.TrimSpace(scanner.Text())
