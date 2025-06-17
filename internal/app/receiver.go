@@ -55,8 +55,6 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 
 	r.ui.ShowMessage(fmt.Sprintf("Preparing to receive file to: %s", opts.DestPath))
 
-	// Data processor is now handled internally by the data channel service
-
 	// Create peer connection
 	peerConn, err := r.peerService.CreatePeerConnection()
 	if err != nil {
@@ -86,6 +84,17 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 		return fmt.Errorf("failed during signalling process: %w", err)
 	}
 
+	// Ensure Firebase session is cleared regardless of how the function exits
+	defer func() {
+		if code != "" {
+			if err := r.signalingService.ClearSession(code); err != nil {
+				log.Printf("Warning: Failed to clear Firebase session: %v", err)
+			} else {
+				log.Printf("Firebase session cleared successfully")
+			}
+		}
+	}()
+
 	// Setup file receiver with progress tracking
 	doneCh, progressCh, err := r.dataChannelService.SetupFileReceiver(peerConn, opts.DestPath)
 	if err != nil {
@@ -94,7 +103,7 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 
 	r.ui.ShowMessage("Receiver is ready. Waiting for file transfer...")
 
-	// Create progress UI  
+	// Create progress UI
 	progressUI := ui.NewProgressUI()
 
 	// Start progress tracking
@@ -123,17 +132,11 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	}()
 
 	// Wait for transfer completion
-	<-doneCh
-	r.ui.ShowMessage("File transfer completed successfully!")
-	
-	// Clear Firebase session after successful transfer
-	if code != "" {
-		if err := r.signalingService.ClearSession(code); err != nil {
-			log.Printf("Warning: Failed to clear Firebase session: %v", err)
-		} else {
-			log.Printf("Firebase session cleared successfully")
-		}
+	select {
+	case <-doneCh:
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	
+
 	return nil
 }

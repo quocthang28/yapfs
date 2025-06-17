@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"yapfs/internal/app"
@@ -100,6 +99,6 @@ func runReceiverApp(flags *ReceiveFlags) error {
 	}
 
 	receiverApp := app.NewReceiverApp(cfg, peerService, dataChannelService, signalingService, ui)
-	ctx := context.Background()
-	return receiverApp.Run(ctx, opts)
+
+	return receiverApp.Run(createContext(), opts)
 }

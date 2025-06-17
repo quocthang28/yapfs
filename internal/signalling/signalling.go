@@ -43,7 +43,12 @@ func (s *SignalingService) StartSenderSignallingProcess(ctx context.Context, pee
 	}
 
 	// Wait for ICE gathering to complete
-	<-webrtc.GatheringCompletePromise(peerConn)
+	select {
+	case <-webrtc.GatheringCompletePromise(peerConn):
+		break
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
 
 	// Get the final offer with ICE candidates
 	finalOffer := peerConn.LocalDescription()
@@ -111,8 +116,13 @@ func (s *SignalingService) StartReceiverSignallingProcess(ctx context.Context, p
 		return fmt.Errorf("failed to create answer: %w", err)
 	}
 
-	// Wait for ICE gathering
-	<-webrtc.GatheringCompletePromise(peerConn)
+	// Wait for ICE gathering to complete
+	select {
+	case <-webrtc.GatheringCompletePromise(peerConn):
+		break
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 
 	// Get the final answer with ICE candidates
 	finalAnswer := peerConn.LocalDescription()

@@ -1,9 +1,9 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"log"
+	"os"
 	"yapfs/internal/app"
 
 	"github.com/spf13/cobra"
@@ -65,6 +65,28 @@ func validateSendFlags(flags *SendFlags) error {
 	if flags.FilePath == "" {
 		return fmt.Errorf("file path is required")
 	}
+
+	// Check if file exists and is accessible
+	fileInfo, err := os.Stat(flags.FilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("file does not exist: %s", flags.FilePath)
+		}
+		return fmt.Errorf("cannot access file: %s (%v)", flags.FilePath, err)
+	}
+
+	// Check if it's a regular file (not a directory)
+	if fileInfo.IsDir() {
+		return fmt.Errorf("path is a directory, not a file: %s", flags.FilePath)
+	}
+
+	// Check if file is readable
+	file, err := os.Open(flags.FilePath)
+	if err != nil {
+		return fmt.Errorf("cannot read file: %s (%v)", flags.FilePath, err)
+	}
+	file.Close()
+
 	// Future validations can be easily added here:
 	// if flags.Timeout <= 0 {
 	//     return fmt.Errorf("timeout must be positive")
@@ -91,6 +113,6 @@ func runSenderApp(flags *SendFlags) error {
 	}
 
 	senderApp := app.NewSenderApp(cfg, peerService, dataChannelService, signalingService, ui)
-	ctx := context.Background()
-	return senderApp.Run(ctx, opts)
+
+	return senderApp.Run(createContext(), opts)
 }

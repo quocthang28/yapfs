@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"path/filepath"
 
 	"yapfs/internal/config"
@@ -49,14 +48,6 @@ func NewSenderApp(
 
 // Run starts the sender application with the given options
 func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
-	// Validate required options
-	if opts.FilePath == "" {
-		return fmt.Errorf("file path is required")
-	}
-	if _, err := os.Stat(opts.FilePath); os.IsNotExist(err) {
-		return fmt.Errorf("file does not exist: %s", opts.FilePath)
-	}
-
 	log.Printf("Preparing to send file: %s", opts.FilePath)
 
 	// Create peer connection
@@ -87,6 +78,17 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	if err != nil {
 		return fmt.Errorf("failed during signalling process: %w", err)
 	}
+
+	// Ensure Firebase session is cleared regardless of how the function exits
+	defer func() {
+		if sessionID != "" {
+			if err := s.signalingService.ClearSession(sessionID); err != nil {
+				log.Printf("Warning: Failed to clear Firebase session: %v", err)
+			} else {
+				log.Printf("Firebase session cleared successfully")
+			}
+		}
+	}()
 
 	// Setup file sender with progress
 	doneCh, progressCh, err := s.dataChannelService.SetupFileSender(ctx, opts.FilePath)
@@ -120,16 +122,11 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	}()
 
 	// Wait for transfer completion
-	<-doneCh
-	
-	// Clear Firebase session after successful transfer
-	if sessionID != "" {
-		if err := s.signalingService.ClearSession(sessionID); err != nil {
-			log.Printf("Warning: Failed to clear Firebase session: %v", err)
-		} else {
-			log.Printf("Firebase session cleared successfully")
-		}
+	select {
+	case <-doneCh:
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	
+
 	return nil
 }
