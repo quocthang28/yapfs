@@ -137,12 +137,9 @@ func createContext() context.Context {
 
 // createServices creates and wires up all the application services
 func createServices() (*transport.PeerService, *transport.DataChannelService, *signalling.SignalingService, *ui.ConsoleUI) {
-	// Create connection state handler
-	stateHandler := &transport.DefaultConnectionStateHandler{}
-
 	// Create services
 	signalingService := signalling.NewSignalingService(cfg)
-	peerService := transport.NewPeerService(cfg, stateHandler)
+	peerService := transport.NewPeerService(cfg)
 	consoleUI := ui.NewConsoleUI()
 	dataChannelService := transport.NewDataChannelService(cfg)
 

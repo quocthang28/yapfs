@@ -50,31 +50,37 @@ func NewSenderApp(
 func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	log.Printf("Preparing to send file: %s", opts.FilePath)
 
-	// Create peer connection
-	peerConn, err := s.peerService.CreatePeerConnection()
+	// Create peer connection with error handling callback
+	stateHandler := transport.CreateDefaultStateHandler(
+		func(err error) {
+			log.Printf("Peer connection error: %v", err)
+		},
+		func() {
+			log.Printf("Peer connection established successfully")
+		},
+	)
+
+	peerConn, err := s.peerService.CreatePeerConnection(ctx, "sender", stateHandler)
 	if err != nil {
 		return fmt.Errorf("failed to create peer connection: %w", err)
 	}
 	defer func() {
-		if err := s.peerService.Close(peerConn); err != nil {
-			log.Printf("Error closing peer connection: %v", err)
-		}
 		if err := s.dataChannelService.Close(); err != nil {
 			log.Printf("Error closing data channel service: %v", err)
 		}
+		if err := peerConn.Close(); err != nil {
+			log.Printf("Error closing peer connection: %v", err)
+		}
 	}()
 
-	// Setup connection state handler
-	s.peerService.SetupConnectionStateHandler(peerConn, "sender")
-
 	// Create data channel for file transfer BEFORE creating the offer
-	err = s.dataChannelService.CreateFileSenderDataChannel(peerConn, "fileTransfer")
+	err = s.dataChannelService.CreateFileSenderDataChannel(peerConn.PeerConnection, "fileTransfer")
 	if err != nil {
 		return fmt.Errorf("failed to create file sender data channel: %w", err)
 	}
 
 	// Start signalling process
-	sessionID, err := s.signalingService.StartSenderSignallingProcess(ctx, peerConn)
+	sessionID, err := s.signalingService.StartSenderSignallingProcess(ctx, peerConn.PeerConnection)
 	if err != nil {
 		return fmt.Errorf("failed during signalling process: %w", err)
 	}

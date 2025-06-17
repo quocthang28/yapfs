@@ -55,22 +55,28 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 
 	r.ui.ShowMessage(fmt.Sprintf("Preparing to receive file to: %s", opts.DestPath))
 
-	// Create peer connection
-	peerConn, err := r.peerService.CreatePeerConnection()
+	// Create peer connection with error handling callback
+	stateHandler := transport.CreateDefaultStateHandler(
+		func(err error) {
+			log.Printf("Peer connection error: %v", err)
+		},
+		func() {
+			log.Printf("Peer connection established successfully")
+		},
+	)
+
+	peerConn, err := r.peerService.CreatePeerConnection(ctx, "receiver", stateHandler)
 	if err != nil {
 		return fmt.Errorf("failed to create peer connection: %w", err)
 	}
 	defer func() {
-		if err := r.peerService.Close(peerConn); err != nil {
-			r.ui.ShowMessage(fmt.Sprintf("Error closing peer connection: %v", err))
-		}
 		if err := r.dataChannelService.Close(); err != nil {
 			r.ui.ShowMessage(fmt.Sprintf("Error closing data channel service: %v", err))
 		}
+		if err := peerConn.Close(); err != nil {
+			r.ui.ShowMessage(fmt.Sprintf("Error closing peer connection: %v", err))
+		}
 	}()
-
-	// Setup connection state handler
-	r.peerService.SetupConnectionStateHandler(peerConn, "receiver")
 
 	// Prompt the user to input code (session ID)
 	code, err := r.ui.InputCode()
@@ -79,7 +85,7 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	}
 
 	// Start signalling process
-	err = r.signalingService.StartReceiverSignallingProcess(ctx, peerConn, code)
+	err = r.signalingService.StartReceiverSignallingProcess(ctx, peerConn.PeerConnection, code)
 	if err != nil {
 		return fmt.Errorf("failed during signalling process: %w", err)
 	}
@@ -96,7 +102,7 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	}()
 
 	// Setup file receiver with progress tracking
-	doneCh, progressCh, err := r.dataChannelService.SetupFileReceiver(peerConn, opts.DestPath)
+	doneCh, progressCh, err := r.dataChannelService.SetupFileReceiver(peerConn.PeerConnection, opts.DestPath)
 	if err != nil {
 		return fmt.Errorf("failed to setup file receiver data channel handler: %w", err)
 	}
