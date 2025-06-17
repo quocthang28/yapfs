@@ -39,6 +39,11 @@ func (d *DataChannelService) SetupFileReceiver(peerConn *webrtc.PeerConnection, 
 	return d.receiver.SetupFileReceiver(peerConn, destPath)
 }
 
+// ClearPartialFile removes any partially written file (delegates to receiver)
+func (d *DataChannelService) ClearPartialFile() error {
+	return d.receiver.ClearPartialFile()
+}
+
 // Close cleans up the DataChannelService resources
 func (d *DataChannelService) Close() error {
 	var errs []error

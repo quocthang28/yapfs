@@ -1,84 +1,115 @@
-# data-channels-flow-control
-This example demonstrates how to use the following property / methods.
+# YAPFS - Yet Another P2P File Sharing
 
-* func (d *DataChannel) BufferedAmount() uint64
-* func (d *DataChannel) SetBufferedAmountLowThreshold(th uint64)
-* func (d *DataChannel) BufferedAmountLowThreshold() uint64
-* func (d *DataChannel) OnBufferedAmountLow(f func())
+A secure peer-to-peer file sharing utility built with WebRTC data channels. Transfer files directly between machines without a central server.
 
-These methods are equivalent to that of JavaScript WebRTC API.
-See https://developer.mozilla.org/en-US/docs/Web/API/RTCDataChannel for more details.
-
-## When do we need it?
-Send or SendText methods are called on DataChannel to send data to the connected peer.
-The methods return immediately, but it does not mean the data was actually sent onto
-the wire. Instead, it is queued in a buffer until it actually gets sent out to the wire.
-
-When you have a large amount of data to send, it is an application's responsibility to
-control the buffered amount in order not to indefinitely grow the buffer size to eventually
-exhaust the memory.
-
-The rate you wish to send data might be much higher than the rate the data channel can
-actually send to the peer over the Internet. The above properties/methods help your
-application to pace the amount of data to be pushed into the data channel.
-
-
-## How to run the example code
-
-This is a CLI application that demonstrates WebRTC data channel flow control between two separate instances/machines. Users manually exchange SDP offers and answers to establish peer-to-peer connections.
-
-```
-                        manual SDP exchange
-           +----------------------------------------+
-           |                                        |
-           v                                        v
-   +---------------+                        +---------------+
-   |               |          data          |               |
-   |     sender    |----------------------->|    receiver   |
-   |:PeerConnection|                        |:PeerConnection|
-   +---------------+                        +---------------+
-```
-
-### Usage
-
-At the root of the example, `pion/webrtc/examples/data-channels-flow-control/`:
+## Quick Start
 
 ```bash
-# Show help
-$ go run *.go
+# Build
+go build -o yapfs
 
-# Start sender (creates offer)
-$ go run *.go send
+# Send a file
+./yapfs send --file /path/to/your/file
 
-# Start receiver (responds to offer) 
-$ go run *.go receive
+# Receive a file  
+./yapfs receive --dst /path/to/save/file
 ```
 
-### Instructions
+## How It Works
 
-1. **Start sender**: Run `go run *.go send` on one machine/terminal
-2. **Start receiver**: Run `go run *.go receive` on another machine/terminal  
-3. **Exchange SDPs**: Copy the SDP output from sender and paste into receiver
-4. **Complete handshake**: Copy the SDP answer from receiver and paste into sender
-5. **Data transfer**: The data channel will establish and start transferring data
+1. **Start sender**: Run `yapfs send` with your file
+2. **Start receiver**: Run `yapfs receive` with destination path
+3. **Exchange session ID**: Sender sends the generated session ID to the receiver using an external communication method.
+4. **Transfer**: Files transfer directly via WebRTC with progress monitoring
 
-Once the data channel is successfully opened, the sender will start sending a series of 1024-byte packets to the receiver as fast as it can while respecting buffer limits, until you kill the process with Ctrl-C.
+## Features
 
-### Example Output
+- **Direct P2P transfer** - No intermediary servers required
+- **Secure WebRTC** - Encrypted data channels with ICE connectivity
+- **Progress monitoring** - Real-time throughput and completion tracking
+- **Flow control** - Intelligent buffering prevents network congestion
+- **Large file support** - Streaming chunks with constant memory usage
+- **Cross-platform** - Works on Linux, macOS, and Windows
 
-**Sender:**
-```
-2019/08/31 14:56:41 OnOpen: data-824635025728. Start sending a series of 1024-byte packets as fast as it can
-```
+## Configuration
 
-**Receiver:**
-```
-2019/08/31 14:56:41 OnOpen: data-824637171120. Start receiving data
-2019/08/31 14:56:42 Throughput: 179.118 Mbps
-2019/08/31 14:56:43 Throughput: 203.545 Mbps
-2019/08/31 14:56:44 Throughput: 211.516 Mbps
-2019/08/31 14:56:45 Throughput: 216.292 Mbps
-2019/08/31 14:56:46 Throughput: 217.961 Mbps
-2019/08/31 14:56:47 Throughput: 218.342 Mbps
- :
+### Available Configuration Options
+
+YAPFS supports configuration via JSON files. See `example-config.json` for a complete template.
+
+#### WebRTC Settings (`webrtc`)
+
+- **`ice_servers`** - Array of STUN/TURN servers for NAT traversal
+  - Default: `[{"urls": ["stun:stun.l.google.com:19302"]}]`
+  - Multiple servers can be specified for redundancy
+
+- **`packet_size`** - Size of each file chunk in bytes
+  - Default: `1024` (1 KB)
+  - Smaller values reduce memory usage but may decrease throughput
+  - Range: 512-8192 bytes recommended
+
+- **`max_buffered_amount`** - Maximum WebRTC send buffer size in bytes
+  - Default: `1048576` (1 MB)
+  - Higher values allow more data buffering but use more memory
+  - Triggers flow control when reached to prevent overwhelming the connection
+
+- **`buffered_amount_low_threshold`** - Resume transmission threshold in bytes
+  - Default: `524288` (512 KB)
+  - Must be less than `max_buffered_amount`
+  - Flow control resumes sending when buffer drops below this level
+
+#### Firebase Settings (`firebase`)
+
+- **`project_id`** - Your Firebase project identifier
+- **`database_url`** - Firebase Realtime Database URL
+- **`credentials_path`** - Path to Firebase service account JSON key file
+
+## Firebase Setup
+
+Firebase Realtime Database is used for automated SDP exchange, eliminating the need for manual copy/paste of connection details.
+
+### 1. Create Firebase Project
+1. Go to [Firebase Console](https://console.firebase.google.com/)
+2. Click "Create a project" or "Add project"
+3. Enter project name (e.g., "yapfs-transfers")
+4. Configure Google Analytics (optional)
+5. Click "Create project"
+
+### 2. Enable Realtime Database
+1. In your Firebase project, go to "Build" → "Realtime Database"
+2. Click "Create Database"
+3. Choose location (select closest to your region)
+4. Start in **test mode** for now (we'll secure it later)
+5. Click "Done"
+
+### 3. Generate Service Account Key
+1. Go to "Project Settings" (gear icon) → "Service accounts"
+2. Click "Generate new private key"
+3. Click "Generate key" to download the JSON file
+4. Save the file securely (e.g., `~/.yapfs-firebase-key.json`)
+
+### 4. Add Firebase to config
+Add Firebase settings to your config file (`config.json`). See `example-config.json` for a complete configuration template:
+
+### 5. Database Security Rules (Production)
+For production use, update your Realtime Database rules:
+
+```json
+{
+  "rules": {
+    "sessions": {
+      "$sessionId": {
+        ".write": true,
+        ".read": true,
+        ".validate": "newData.hasChildren(['offer', 'answer']) || newData.hasChild('offer')",
+        "offer": {
+          ".validate": "newData.isString()"
+        },
+        "answer": {
+          ".validate": "newData.isString()"
+        }
+      }
+    }
+  }
+}
 ```

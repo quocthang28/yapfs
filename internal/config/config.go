@@ -8,7 +8,6 @@ import (
 var (
 	ErrInvalidBufferConfig        = errors.New("buffered amount low threshold must be less than max buffered amount")
 	ErrInvalidPacketSize          = errors.New("packet size must be greater than 0")
-	ErrInvalidReportInterval      = errors.New("throughput report interval must be greater than 0")
 	ErrInvalidFirebaseConfig      = errors.New("Firebase credentials path must be set")
 	ErrInvalidFirebaseProjectID   = errors.New("Firebase project ID must be set")
 	ErrInvalidFirebaseDatabaseURL = errors.New("Firebase database URL must be set")
@@ -26,7 +25,6 @@ type WebRTCConfig struct {
 	BufferedAmountLowThreshold uint64             `json:"buffered_amount_low_threshold"`
 	MaxBufferedAmount          uint64             `json:"max_buffered_amount"`
 	PacketSize                 int                `json:"packet_size"`
-	ThroughputReportInterval   int                `json:"throughput_report_interval_ms"`
 }
 
 // FirebaseConfig holds Firebase client configuration
@@ -48,7 +46,6 @@ func NewDefaultConfig() *Config {
 			BufferedAmountLowThreshold: 512 * 1024,  // 512 KB
 			MaxBufferedAmount:          1024 * 1024, // 1 MB
 			PacketSize:                 1024,        // 1 KB packets
-			ThroughputReportInterval:   1000,        // 1 second
 		},
 		Firebase: FirebaseConfig{
 			ProjectID:       "",
@@ -65,9 +62,6 @@ func (c *Config) Validate() error {
 	}
 	if c.WebRTC.PacketSize <= 0 {
 		return ErrInvalidPacketSize
-	}
-	if c.WebRTC.ThroughputReportInterval <= 0 {
-		return ErrInvalidReportInterval
 	}
 	if c.Firebase.CredentialsPath == "" {
 		return ErrInvalidFirebaseConfig

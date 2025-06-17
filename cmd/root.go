@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -128,7 +127,7 @@ func createContext() context.Context {
 
 	go func() {
 		<-sigChan
-		fmt.Println("\nReceived interrupt signal, shutting down...")
+		log.Println("\nReceived interrupt signal, shutting down...")
 		cancel()
 	}()
 

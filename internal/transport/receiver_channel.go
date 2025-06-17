@@ -79,6 +79,14 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, des
 	return doneCh, progressCh, nil
 }
 
+// ClearPartialFile removes any partially written file
+func (r *ReceiverChannel) ClearPartialFile() error {
+	if r.dataProcessor != nil {
+		return r.dataProcessor.ClearPartialFile()
+	}
+	return nil
+}
+
 // Close cleans up the ReceiverChannel resources
 func (r *ReceiverChannel) Close() error {
 	if r.dataProcessor != nil {

@@ -83,6 +83,11 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 
 	// Single cleanup function
 	cleanup := func(code string) {
+		// Always attempt to clear partial file - DataProcessor will handle the logic
+		if err := r.dataChannelService.ClearPartialFile(); err != nil {
+			log.Printf("Warning: Failed to clear partial file: %v", err)
+		}
+
 		if err := r.dataChannelService.Close(); err != nil {
 			r.ui.ShowMessage(fmt.Sprintf("Error closing data channel service: %v", err))
 		}
@@ -130,6 +135,7 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	case <-doneCh:
 		// Transfer completed successfully
 	case <-ctx.Done():
+		// Context cancelled
 		exitErr = ctx.Err()
 	case exitErr = <-exitCh:
 		// Connection closed or error
