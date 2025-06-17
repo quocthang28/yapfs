@@ -37,7 +37,7 @@ func NewSignalingService(cfg *config.Config) *SignalingService {
 // StartSenderSignallingProcess orchestrates the complete sender signaling flow
 func (s *SignalingService) StartSenderSignallingProcess(ctx context.Context, peerConn *webrtc.PeerConnection) (string, error) {
 	// Create offer
-	_, err := s.CreateOffer(peerConn)
+	_, err := s.createOffer(peerConn)
 	if err != nil {
 		return "", fmt.Errorf("failed to create offer: %w", err)
 	}
@@ -106,7 +106,7 @@ func (s *SignalingService) StartReceiverSignallingProcess(ctx context.Context, p
 	}
 
 	// Create answer
-	_, err = s.CreateAnswer(peerConn)
+	_, err = s.createAnswer(peerConn)
 	if err != nil {
 		return fmt.Errorf("failed to create answer: %w", err)
 	}
@@ -135,8 +135,8 @@ func (s *SignalingService) StartReceiverSignallingProcess(ctx context.Context, p
 	return nil
 }
 
-// CreateOffer creates and sets an SDP offer for the peer connection
-func (s *SignalingService) CreateOffer(peerConn *webrtc.PeerConnection) (*webrtc.SessionDescription, error) {
+// createOffer creates and sets an SDP offer for the peer connection
+func (s *SignalingService) createOffer(peerConn *webrtc.PeerConnection) (*webrtc.SessionDescription, error) {
 	offer, err := peerConn.CreateOffer(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create offer: %w", err)
@@ -150,8 +150,8 @@ func (s *SignalingService) CreateOffer(peerConn *webrtc.PeerConnection) (*webrtc
 	return &offer, nil
 }
 
-// CreateAnswer creates and sets an SDP answer for the peer connection
-func (s *SignalingService) CreateAnswer(peerConn *webrtc.PeerConnection) (*webrtc.SessionDescription, error) {
+// createAnswer creates and sets an SDP answer for the peer connection
+func (s *SignalingService) createAnswer(peerConn *webrtc.PeerConnection) (*webrtc.SessionDescription, error) {
 	answer, err := peerConn.CreateAnswer(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create answer: %w", err)

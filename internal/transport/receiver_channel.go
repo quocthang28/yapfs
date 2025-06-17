@@ -41,6 +41,7 @@ func NewReceiverChannel(cfg *config.Config) *ReceiverChannel {
 func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, destPath string) (<-chan struct{}, <-chan ProgressUpdate, error) {
 	doneCh := make(chan struct{})
 	progressCh := make(chan ProgressUpdate, 5) // Buffer progress updates
+	errorCh := make(chan error, 1)             // Buffer for data channel errors
 	var doneOnce sync.Once                     // Ensure doneCh is closed only once
 	var progressOnce sync.Once                 // Ensure progressCh is closed only once
 
@@ -62,7 +63,7 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, des
 
 		r.dataChannel.OnClose(func() {
 			log.Printf("File transfer data channel closed")
-			// Clean up any open files
+			// Clean up any open files (normal close, not cleanup)
 			r.dataProcessor.Close()
 			// Close progress channel if not already closed
 			progressOnce.Do(func() { close(progressCh) })
@@ -70,12 +71,34 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, des
 
 		r.dataChannel.OnError(func(err error) {
 			log.Printf("File transfer data channel error: %v", err)
-			// Clean up any open files. //TODO: clean up partially written file
-			r.dataProcessor.Close()
+			// Send error to app layer for handling
+			select {
+			case errorCh <- fmt.Errorf("data channel error: %w", err):
+			default:
+				// Channel full, ignore
+			}
 			// Close progress channel if not already closed
 			progressOnce.Do(func() { close(progressCh) })
 		})
 	})
+
+	// Start error monitoring goroutine
+	go func() {
+		select {
+		case err := <-errorCh:
+			log.Printf("Data channel error occurred: %v", err)
+			// Clean up partially written file on error
+			if cleanupErr := r.dataProcessor.CleanupPartialFile(); cleanupErr != nil {
+				log.Printf("Error cleaning up partial file: %v", cleanupErr)
+			} else {
+				log.Printf("Cleaned up partially written file due to connection error")
+			}
+			// Close done channel to signal error to app layer
+			doneOnce.Do(func() { close(doneCh) })
+		case <-doneCh:
+			// Normal completion, nothing to do
+		}
+	}()
 
 	return doneCh, progressCh, nil
 }
@@ -84,6 +107,14 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, des
 func (r *ReceiverChannel) Close() error {
 	if r.dataProcessor != nil {
 		return r.dataProcessor.Close()
+	}
+	return nil
+}
+
+// CleanupPartialFile cleans up partially written files on connection failure
+func (r *ReceiverChannel) CleanupPartialFile() error {
+	if r.dataProcessor != nil {
+		return r.dataProcessor.CleanupPartialFile()
 	}
 	return nil
 }

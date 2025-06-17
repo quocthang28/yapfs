@@ -59,6 +59,19 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 
 	log.Printf("Preparing to send file: %s", opts.FilePath)
 
+	// Session cleanup - will be set after signaling
+	var sessionID string
+	defer func() {
+		// Always cleanup session, regardless of how we exit
+		if sessionID != "" {
+			if err := s.signalingService.ClearSession(sessionID); err != nil {
+				log.Printf("Warning: Failed to clear Firebase session: %v", err)
+			} else {
+				log.Printf("Firebase session cleared successfully")
+			}
+		}
+	}()
+
 	// Create peer connection
 	peerConn, err := s.peerService.CreatePeerConnection()
 	if err != nil {
@@ -73,8 +86,19 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 		}
 	}()
 
-	// Setup connection state handler
-	s.peerService.SetupConnectionStateHandler(peerConn, "sender")
+	// Create composite cleanup function for session cleanup (sender doesn't write files)
+	compositeCleanup := func() error {
+		// Session cleanup
+		if sessionID != "" {
+			if err := s.signalingService.ClearSession(sessionID); err != nil {
+				log.Printf("Session cleanup error: %v", err)
+			}
+		}
+		return nil
+	}
+
+	// Setup connection state handler with session cleanup
+	s.peerService.SetupConnectionStateHandler(peerConn, "sender", compositeCleanup)
 
 	// Create data channel for file transfer BEFORE creating the offer
 	err = s.dataChannelService.CreateFileSenderDataChannel(peerConn, "fileTransfer")
@@ -83,7 +107,7 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	}
 
 	// Start signalling process
-	sessionID, err := s.signalingService.StartSenderSignallingProcess(ctx, peerConn)
+	sessionID, err = s.signalingService.StartSenderSignallingProcess(ctx, peerConn)
 	if err != nil {
 		return fmt.Errorf("failed during signalling process: %w", err)
 	}
@@ -119,17 +143,20 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 		}
 	}()
 
-	// Wait for transfer completion
-	<-doneCh
-	
-	// Clear Firebase session after successful transfer
-	if sessionID != "" {
-		if err := s.signalingService.ClearSession(sessionID); err != nil {
-			log.Printf("Warning: Failed to clear Firebase session: %v", err)
-		} else {
-			log.Printf("Firebase session cleared successfully")
+	// Monitor for both transfer completion and connection failures
+	select {
+	case <-doneCh:
+		s.ui.ShowMessage("File transfer completed successfully!")
+		return nil
+	case failure := <-s.peerService.GetFailureChannel():
+		s.ui.ShowMessage(fmt.Sprintf("Connection failed: %v", failure))
+		// Perform cleanup before returning error
+		if err := s.peerService.PerformCleanup(); err != nil {
+			log.Printf("Cleanup error: %v", err)
 		}
+		return failure
+	case <-ctx.Done():
+		s.ui.ShowMessage("Transfer cancelled by user")
+		return ctx.Err()
 	}
-	
-	return nil
 }

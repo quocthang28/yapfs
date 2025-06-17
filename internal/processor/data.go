@@ -143,3 +143,30 @@ func (d *DataProcessor) Close() error {
 	}
 	return nil
 }
+
+// CleanupPartialFile closes and removes partially written file on connection failure
+func (d *DataProcessor) CleanupPartialFile() error {
+	if d.currentWriter == nil {
+		return nil
+	}
+
+	filePath := d.currentWriter.destPath
+	
+	// Close the file first
+	err := d.currentWriter.close()
+	d.currentWriter = nil
+
+	// Remove the partially written file
+	removeErr := os.Remove(filePath)
+	if removeErr != nil {
+		// File might not exist or already removed, log but don't fail
+		if !os.IsNotExist(removeErr) {
+			if err != nil {
+				return fmt.Errorf("failed to close file (%v) and remove partial file: %w", err, removeErr)
+			}
+			return fmt.Errorf("failed to remove partial file: %w", removeErr)
+		}
+	}
+
+	return err
+}

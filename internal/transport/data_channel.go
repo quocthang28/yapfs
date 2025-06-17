@@ -56,3 +56,11 @@ func (d *DataChannelService) Close() error {
 	}
 	return nil
 }
+
+// GetCleanupFunc returns a cleanup function for partially written files
+func (d *DataChannelService) GetCleanupFunc() func() error {
+	return func() error {
+		// Delegate to receiver channel's data processor for cleanup
+		return d.receiver.CleanupPartialFile()
+	}
+}

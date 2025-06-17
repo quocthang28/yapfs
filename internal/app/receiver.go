@@ -55,6 +55,19 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 
 	r.ui.ShowMessage(fmt.Sprintf("Preparing to receive file to: %s", opts.DestPath))
 
+	// Session cleanup - will be set after signaling
+	var sessionID string
+	defer func() {
+		// Always cleanup session, regardless of how we exit
+		if sessionID != "" {
+			if err := r.signalingService.ClearSession(sessionID); err != nil {
+				log.Printf("Warning: Failed to clear Firebase session: %v", err)
+			} else {
+				log.Printf("Firebase session cleared successfully")
+			}
+		}
+	}()
+
 	// Data processor is now handled internally by the data channel service
 
 	// Create peer connection
@@ -71,14 +84,31 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 		}
 	}()
 
-	// Setup connection state handler
-	r.peerService.SetupConnectionStateHandler(peerConn, "receiver")
+	// Create composite cleanup function that handles both file and session cleanup
+	compositeCleanup := func() error {
+		// File cleanup
+		if err := r.dataChannelService.GetCleanupFunc()(); err != nil {
+			log.Printf("File cleanup error: %v", err)
+		}
+		
+		// Session cleanup
+		if sessionID != "" {
+			if err := r.signalingService.ClearSession(sessionID); err != nil {
+				log.Printf("Session cleanup error: %v", err)
+			}
+		}
+		return nil
+	}
+
+	// Setup connection state handler with composite cleanup
+	r.peerService.SetupConnectionStateHandler(peerConn, "receiver", compositeCleanup)
 
 	// Prompt the user to input code (session ID)
 	code, err := r.ui.InputCode()
 	if err != nil {
 		return fmt.Errorf("failed to get code from user: %w", err)
 	}
+	sessionID = code // Store for cleanup
 
 	// Start signalling process
 	err = r.signalingService.StartReceiverSignallingProcess(ctx, peerConn, code)
@@ -122,18 +152,20 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 		}
 	}()
 
-	// Wait for transfer completion
-	<-doneCh
-	r.ui.ShowMessage("File transfer completed successfully!")
-	
-	// Clear Firebase session after successful transfer
-	if code != "" {
-		if err := r.signalingService.ClearSession(code); err != nil {
-			log.Printf("Warning: Failed to clear Firebase session: %v", err)
-		} else {
-			log.Printf("Firebase session cleared successfully")
+	// Monitor for both transfer completion and connection failures
+	select {
+	case <-doneCh:
+		r.ui.ShowMessage("File transfer completed successfully!")
+		return nil
+	case failure := <-r.peerService.GetFailureChannel():
+		r.ui.ShowMessage(fmt.Sprintf("Connection failed: %v", failure))
+		// Perform cleanup before returning error
+		if err := r.peerService.PerformCleanup(); err != nil {
+			log.Printf("Cleanup error: %v", err)
 		}
+		return failure
+	case <-ctx.Done():
+		r.ui.ShowMessage("Transfer cancelled by user")
+		return ctx.Err()
 	}
-	
-	return nil
 }

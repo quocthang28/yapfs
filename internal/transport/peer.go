@@ -2,24 +2,38 @@ package transport
 
 import (
 	"fmt"
-	"os"
 
 	"yapfs/internal/config"
 
 	"github.com/pion/webrtc/v4"
 )
 
+// CleanupFunc defines a function type for cleanup operations on connection failure
+type CleanupFunc func() error
+
+// ConnectionFailureError represents a connection failure with cleanup capability
+type ConnectionFailureError struct {
+	State   webrtc.PeerConnectionState
+	Role    string
+	Message string
+}
+
+func (e *ConnectionFailureError) Error() string {
+	return fmt.Sprintf("connection failed in %s state for %s: %s", e.State.String(), e.Role, e.Message)
+}
+
 // PeerService manages WebRTC peer connection lifecycle
 type PeerService struct {
-	config       *config.Config
-	stateHandler *DefaultConnectionStateHandler
+	config        *config.Config
+	failureChan   chan *ConnectionFailureError
+	cleanupFunc   CleanupFunc
 }
 
 // NewPeerService creates a new peer service with the given configuration
-func NewPeerService(cfg *config.Config, stateHandler *DefaultConnectionStateHandler) *PeerService {
+func NewPeerService(cfg *config.Config) *PeerService {
 	return &PeerService{
-		config:       cfg,
-		stateHandler: stateHandler,
+		config:      cfg,
+		failureChan: make(chan *ConnectionFailureError, 1),
 	}
 }
 
@@ -38,15 +52,16 @@ func (p *PeerService) CreatePeerConnection() (*webrtc.PeerConnection, error) {
 }
 
 // SetupConnectionStateHandler configures connection state change handling
-func (p *PeerService) SetupConnectionStateHandler(peerConn *webrtc.PeerConnection, role string) {
+func (p *PeerService) SetupConnectionStateHandler(peerConn *webrtc.PeerConnection, role string, cleanup CleanupFunc) {
+	p.cleanupFunc = cleanup
 	peerConn.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		if p.stateHandler != nil {
-			p.stateHandler.OnStateChange(state, role)
-		} else {
-			// Default behavior if no handler provided
-			p.defaultStateHandler(state, role)
-		}
+		p.handleConnectionStateChange(state, role)
 	})
+}
+
+// GetFailureChannel returns a channel that receives connection failures
+func (p *PeerService) GetFailureChannel() <-chan *ConnectionFailureError {
+	return p.failureChan
 }
 
 // Close gracefully closes the peer connection
@@ -57,35 +72,46 @@ func (p *PeerService) Close(peerConn *webrtc.PeerConnection) error {
 	return peerConn.Close()
 }
 
-// defaultStateHandler provides default connection state handling
-func (p *PeerService) defaultStateHandler(state webrtc.PeerConnectionState, role string) {
+// handleConnectionStateChange centralized connection state handling
+func (p *PeerService) handleConnectionStateChange(state webrtc.PeerConnectionState, role string) {
 	fmt.Printf("Peer Connection State has changed: %s (%s)\n", state.String(), role)
 
-	if state == webrtc.PeerConnectionStateFailed {
-		fmt.Println("Peer Connection has gone to failed exiting")
-		os.Exit(0)
-	}
-
-	if state == webrtc.PeerConnectionStateClosed {
-		fmt.Println("Peer Connection has gone to closed exiting")
-		os.Exit(0)
+	switch state {
+	case webrtc.PeerConnectionStateFailed:
+		fmt.Println("Peer Connection has gone to failed")
+		// Send failure notification instead of exiting
+		select {
+		case p.failureChan <- &ConnectionFailureError{
+			State:   state,
+			Role:    role,
+			Message: "peer connection failed",
+		}:
+		default:
+			// Channel full, ignore (shouldn't happen with buffer size 1)
+		}
+	case webrtc.PeerConnectionStateClosed:
+		fmt.Println("Peer Connection has gone to closed")
+		// Send closure notification instead of exiting
+		select {
+		case p.failureChan <- &ConnectionFailureError{
+			State:   state,
+			Role:    role,
+			Message: "peer connection closed",
+		}:
+		default:
+			// Channel full, ignore
+		}
 	}
 }
 
-// DefaultConnectionStateHandler provides a default implementation of ConnectionStateHandler
-type DefaultConnectionStateHandler struct{}
-
-// OnStateChange implements ConnectionStateHandler interface
-func (d *DefaultConnectionStateHandler) OnStateChange(state webrtc.PeerConnectionState, role string) {
-	fmt.Printf("Peer Connection State has changed: %s (%s)\n", state.String(), role)
-
-	if state == webrtc.PeerConnectionStateFailed {
-		fmt.Println("Peer Connection has gone to failed exiting")
-		os.Exit(0)
+// PerformCleanup performs cleanup operations without exiting
+func (p *PeerService) PerformCleanup() error {
+	if p.cleanupFunc != nil {
+		if err := p.cleanupFunc(); err != nil {
+			fmt.Printf("Error during cleanup: %v\n", err)
+			return err
+		}
+		fmt.Println("Cleanup completed successfully")
 	}
-
-	if state == webrtc.PeerConnectionStateClosed {
-		fmt.Println("Peer Connection has gone to closed exiting")
-		os.Exit(0)
-	}
+	return nil
 }

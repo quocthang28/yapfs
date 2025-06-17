@@ -65,7 +65,7 @@ func (s *SessionService) checkForAnswer(ctx context.Context, sessionID string) (
 	time.Sleep(time.Second * 5)
 	log.Printf("Waiting for receiver to answer...")
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		// Refresh session data from storage
 		var sessionData struct {
 			Answer string `json:"answer"`
