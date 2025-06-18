@@ -46,9 +46,9 @@ func (p *PeerService) CreatePeerConnection(ctx context.Context, role string, sta
 
 	wrappedPC := &PeerConnection{
 		PeerConnection: pc,
-		role:          role,
-		stateHandler:  stateHandler,
-		closed:        false,
+		role:           role,
+		stateHandler:   stateHandler,
+		closed:         false,
 	}
 
 	// Set up centralized state change handling
