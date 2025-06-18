@@ -34,14 +34,12 @@ func NewSenderApp(
 	peerService *transport.PeerService,
 	dataChannelService *transport.DataChannelService,
 	signalingService *signalling.SignalingService,
-	ui *ui.ConsoleUI,
 ) *SenderApp {
 	return &SenderApp{
 		config:             cfg,
 		peerService:        peerService,
 		dataChannelService: dataChannelService,
 		signalingService:   signalingService,
-		ui:                 ui,
 	}
 }
 
@@ -52,8 +50,8 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	// Single exit channel for all termination conditions
 	exitCh := make(chan error, 1)
 
-	// Create peer connection with state handler
-	stateHandler := transport.CreateDefaultStateHandler(
+	// Create peer connection with callback functions
+	peerConn, err := s.peerService.CreatePeerConnection(ctx, "sender",
 		func(err error) {
 			log.Printf("Peer connection error: %v", err)
 			select {
@@ -70,8 +68,6 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 			}
 		},
 	)
-
-	peerConn, err := s.peerService.CreatePeerConnection(ctx, "sender", stateHandler)
 	if err != nil {
 		return fmt.Errorf("failed to create peer connection: %w", err)
 	}
@@ -117,11 +113,12 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	}
 
 	// Start updating progress on UI
-	consoleUI := ui.NewConsoleUI()
-	go consoleUI.StartSending(progressCh)
+	consoleUI := ui.NewConsoleUI("Sending")
+	go consoleUI.StartUpdatingSenderProgress(progressCh)
 
 	// Wait for any exit condition
 	var exitErr error
+
 	select {
 	case <-doneCh:
 		// Transfer completed successfully

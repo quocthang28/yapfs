@@ -10,15 +10,14 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-// ConnectionStateCallback defines the callback function for connection state changes
-type ConnectionStateCallback func(state webrtc.PeerConnectionState, role string) error
-
 // PeerConnection wraps webrtc.PeerConnection with state management
 type PeerConnection struct {
 	*webrtc.PeerConnection
-	role         string
-	stateHandler ConnectionStateCallback
-	closed       bool
+	role    string
+	closed  bool
+	onError func(error)
+	onConnected func()
+	onClosed func()
 }
 
 // PeerService manages WebRTC peer connection lifecycle with centralized state management
@@ -33,8 +32,9 @@ func NewPeerService(cfg *config.Config) *PeerService {
 	}
 }
 
-// CreatePeerConnection creates a new peer connection with centralized state management
-func (p *PeerService) CreatePeerConnection(ctx context.Context, role string, stateHandler ConnectionStateCallback) (*PeerConnection, error) {
+// CreatePeerConnection creates a new peer connection with direct callback handling
+// The callbacks are used directly in OnConnectionStateChange for state management
+func (p *PeerService) CreatePeerConnection(ctx context.Context, role string, onError func(error), onConnected func(), onClosed func()) (*PeerConnection, error) {
 	webrtcConfig := webrtc.Configuration{
 		ICEServers: p.config.WebRTC.ICEServers,
 	}
@@ -47,11 +47,13 @@ func (p *PeerService) CreatePeerConnection(ctx context.Context, role string, sta
 	wrappedPC := &PeerConnection{
 		PeerConnection: pc,
 		role:           role,
-		stateHandler:   stateHandler,
 		closed:         false,
+		onError:        onError,
+		onConnected:    onConnected,
+		onClosed:       onClosed,
 	}
 
-	// Set up centralized state change handling
+	// Set up state change handling with direct callbacks
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		if wrappedPC.closed {
 			return // Ignore state changes after close
@@ -59,18 +61,22 @@ func (p *PeerService) CreatePeerConnection(ctx context.Context, role string, sta
 
 		log.Printf("Peer Connection State changed: %s (%s)", state.String(), role)
 
-		if stateHandler != nil {
-			if err := stateHandler(state, role); err != nil {
-				log.Printf("State handler error: %v", err)
+		switch state {
+		case webrtc.PeerConnectionStateFailed:
+			log.Printf("Peer Connection failed (%s)", role)
+			if wrappedPC.onError != nil {
+				wrappedPC.onError(fmt.Errorf("peer connection failed (%s)", role))
 			}
-		} else {
-			// Default behavior - just log critical states
-			switch state {
-			case webrtc.PeerConnectionStateFailed:
-				log.Printf("Peer Connection failed (%s)", role)
-			case webrtc.PeerConnectionStateClosed:
-				log.Printf("Peer Connection closed (%s)", role)
-				wrappedPC.closed = true
+		case webrtc.PeerConnectionStateConnected:
+			log.Printf("Peer connection established successfully (%s)", role)
+			if wrappedPC.onConnected != nil {
+				wrappedPC.onConnected()
+			}
+		case webrtc.PeerConnectionStateClosed:
+			log.Printf("Peer connection closed gracefully (%s)", role)
+			wrappedPC.closed = true
+			if wrappedPC.onClosed != nil {
+				wrappedPC.onClosed()
 			}
 		}
 	})
@@ -104,47 +110,3 @@ func (pc *PeerConnection) Close() error {
 	return pc.PeerConnection.Close()
 }
 
-// DefaultStateHandler provides a sensible default state handler that doesn't exit the process
-func DefaultStateHandler(state webrtc.PeerConnectionState, role string) error {
-	switch state {
-	case webrtc.PeerConnectionStateFailed:
-		return fmt.Errorf("peer connection failed (%s)", role)
-	case webrtc.PeerConnectionStateClosed:
-		log.Printf("Peer connection closed gracefully (%s)", role)
-		return nil
-	case webrtc.PeerConnectionStateConnected:
-		log.Printf("Peer connection established successfully (%s)", role)
-		return nil
-	default:
-		// Other states are informational
-		return nil
-	}
-}
-
-// CreateDefaultStateHandler returns a state handler that propagates errors instead of exiting
-func CreateDefaultStateHandler(onError func(error), onConnected func(), onClosed func()) ConnectionStateCallback {
-	return func(state webrtc.PeerConnectionState, role string) error {
-		switch state {
-		case webrtc.PeerConnectionStateFailed:
-			err := fmt.Errorf("peer connection failed (%s)", role)
-			if onError != nil {
-				onError(err)
-			}
-			return err
-		case webrtc.PeerConnectionStateConnected:
-			log.Printf("Peer connection established successfully (%s)", role)
-			if onConnected != nil {
-				onConnected()
-			}
-			return nil
-		case webrtc.PeerConnectionStateClosed:
-			log.Printf("Peer connection closed gracefully (%s)", role)
-			if onClosed != nil {
-				onClosed()
-			}
-			return nil
-		default:
-			return nil
-		}
-	}
-}

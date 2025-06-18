@@ -17,7 +17,6 @@ import (
 
 // ConsoleUI implements console-based interactive UI with progress tracking
 type ConsoleUI struct {
-	// Progress tracking fields
 	bar            *progressbar.ProgressBar
 	operation      string // "Sending" or "Receiving"
 	totalBytes     uint64
@@ -26,8 +25,12 @@ type ConsoleUI struct {
 }
 
 // NewConsoleUI creates a new console-based interactive UI
-func NewConsoleUI() *ConsoleUI {
-	return &ConsoleUI{}
+func NewConsoleUI(operation string) *ConsoleUI {
+	ui := &ConsoleUI{
+		operation: operation,
+	}
+	ui.initProgressBar()
+	return ui
 }
 
 // ShowMessage displays a message to the user
@@ -66,17 +69,13 @@ func (c *ConsoleUI) InputCode(ctx context.Context) (string, error) {
 
 // Progress tracking methods
 
-// StartSending starts progress tracking for sending with internal progress handling
-func (c *ConsoleUI) StartSending(progressCh <-chan transport.ProgressUpdate) {
-	c.operation = "Sending"
-	c.initProgressBar()
+// StartUpdatingSenderProgress starts progress tracking for sending with internal progress handling
+func (c *ConsoleUI) StartUpdatingSenderProgress(progressCh <-chan transport.ProgressUpdate) {
 	c.handleProgressUpdates(progressCh)
 }
 
-// StartReceiving starts progress tracking for receiving with internal progress handling
-func (c *ConsoleUI) StartReceiving(progressCh <-chan transport.ProgressUpdate) {
-	c.operation = "Receiving"
-	c.initProgressBar()
+// StartUpdatingReceiverProgress starts progress tracking for receiving with internal progress handling
+func (c *ConsoleUI) StartUpdatingReceiverProgress(progressCh <-chan transport.ProgressUpdate) {
 	c.handleProgressUpdates(progressCh)
 }
 
@@ -86,9 +85,15 @@ func (c *ConsoleUI) initProgressBar() {
 		return // Already initialized
 	}
 
+	// Use operation if set, otherwise use generic description
+	description := "Transfer..."
+	if c.operation != "" {
+		description = fmt.Sprintf("%s...", c.operation)
+	}
+
 	// Create a placeholder progress bar that will be updated with actual size later
 	c.bar = progressbar.NewOptions64(-1, // Indeterminate progress initially
-		progressbar.OptionSetDescription(fmt.Sprintf("%s...", c.operation)),
+		progressbar.OptionSetDescription(description),
 		progressbar.OptionSetWriter(os.Stderr),
 		progressbar.OptionShowBytes(true),
 		progressbar.OptionSetWidth(50),

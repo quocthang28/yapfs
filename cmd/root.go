@@ -10,7 +10,6 @@ import (
 	"yapfs/internal/config"
 	"yapfs/internal/signalling"
 	"yapfs/internal/transport"
-	"yapfs/internal/ui"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -132,7 +131,7 @@ func createContext() context.Context {
 }
 
 // createServices creates and wires up all the application services
-func createServices() (*transport.PeerService, *transport.DataChannelService, *signalling.SignalingService, *ui.ConsoleUI) {
+func createServices() (*transport.PeerService, *transport.DataChannelService, *signalling.SignalingService) {
 	// Create services
 	signalingService, err := signalling.NewDefaultSignalingService(cfg)
 	if err != nil {
@@ -140,8 +139,8 @@ func createServices() (*transport.PeerService, *transport.DataChannelService, *s
 	}
 
 	peerService := transport.NewPeerService(cfg)
-	consoleUI := ui.NewConsoleUI()
+
 	dataChannelService := transport.NewDataChannelService(cfg)
 
-	return peerService, dataChannelService, signalingService, consoleUI
+	return peerService, dataChannelService, signalingService
 }

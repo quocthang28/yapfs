@@ -1,1 +1,0 @@
-take a look at config file, change buffer size and threshhold, file buffer and webrtc data channel packaet size

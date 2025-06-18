@@ -34,14 +34,12 @@ func NewReceiverApp(
 	peerService *transport.PeerService,
 	dataChannelService *transport.DataChannelService,
 	signalingService *signalling.SignalingService,
-	ui *ui.ConsoleUI,
 ) *ReceiverApp {
 	return &ReceiverApp{
 		config:             cfg,
 		peerService:        peerService,
 		dataChannelService: dataChannelService,
 		signalingService:   signalingService,
-		ui:                 ui,
 	}
 }
 
@@ -57,8 +55,8 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	// Single exit channel for all termination conditions
 	exitCh := make(chan error, 1)
 
-	// Create peer connection with state handler
-	stateHandler := transport.CreateDefaultStateHandler(
+	// Create peer connection with callback functions
+	peerConn, err := r.peerService.CreatePeerConnection(ctx, "receiver",
 		func(err error) {
 			log.Printf("Peer connection error: %v", err)
 			select {
@@ -75,8 +73,6 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 			}
 		},
 	)
-
-	peerConn, err := r.peerService.CreatePeerConnection(ctx, "receiver", stateHandler)
 	if err != nil {
 		return fmt.Errorf("failed to create peer connection: %w", err)
 	}
@@ -125,11 +121,12 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	}
 
 	// Start updating progress on UI
-	consoleUI := ui.NewConsoleUI()
-	go consoleUI.StartReceiving(progressCh)
+	consoleUI := ui.NewConsoleUI("Receiving")
+	go consoleUI.StartUpdatingReceiverProgress(progressCh)
 
 	// Wait for any exit condition
 	var exitErr error
+
 	select {
 	case <-doneCh:
 		// Transfer completed successfully
