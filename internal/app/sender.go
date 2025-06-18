@@ -105,7 +105,8 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	// Start signalling process
 	sessionID, err := s.signalingService.StartSenderSignallingProcess(ctx, peerConn.PeerConnection)
 	if err != nil {
-		cleanup("")
+		cleanup(sessionID)
+
 		return fmt.Errorf("failed during signalling process: %w", err)
 	}
 
@@ -113,11 +114,13 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	doneCh, progressCh, err := s.dataChannelService.SetupFileSender(ctx, opts.FilePath)
 	if err != nil {
 		cleanup(sessionID)
+		
 		return fmt.Errorf("failed to setup file sender: %w", err)
 	}
 
 	// Start updating progress on UI
-	go s.updateProgress(progressCh)
+	consoleUI := ui.NewConsoleUI()
+	go consoleUI.StartSending(progressCh)
 
 	// Wait for any exit condition
 	var exitErr error
@@ -131,11 +134,6 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	}
 
 	cleanup(sessionID)
-	
-	return exitErr
-}
 
-func (s *SenderApp) updateProgress(progressCh <-chan transport.ProgressUpdate) {
-	consoleUI := ui.NewConsoleUI()
-	consoleUI.StartSending(progressCh)
+	return exitErr
 }

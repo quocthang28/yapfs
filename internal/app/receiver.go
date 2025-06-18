@@ -127,7 +127,8 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	}
 
 	// Start updating progress on UI
-	go r.updateProgress(progressCh)
+	consoleUI := ui.NewConsoleUI()
+	go consoleUI.StartReceiving(progressCh)
 
 	// Wait for any exit condition
 	var exitErr error
@@ -142,11 +143,6 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	}
 
 	cleanup(code)
-	
-	return exitErr
-}
 
-func (r *ReceiverApp) updateProgress(progressCh <-chan transport.ProgressUpdate) {
-	consoleUI := ui.NewConsoleUI()
-	consoleUI.StartReceiving(progressCh)
+	return exitErr
 }

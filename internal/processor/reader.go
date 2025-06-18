@@ -29,10 +29,10 @@ type DataChunk struct {
 
 // fileReader wraps an open file for sending (internal to ReaderService)
 type fileReader struct {
-	file       *os.File
-	fileInfo   os.FileInfo
-	filePath   string
-	bufReader  *bufio.Reader
+	file      *os.File
+	fileInfo  os.FileInfo
+	filePath  string
+	bufReader *bufio.Reader
 }
 
 // prepareFileForReading opens file and validates it's ready for reading
@@ -98,7 +98,6 @@ func (r *readerService) startReading(reader *fileReader, chunkSize int) (<-chan 
 
 	return dataCh, errCh
 }
-
 
 // close closes the internal file reader
 func (fr *fileReader) close() error {

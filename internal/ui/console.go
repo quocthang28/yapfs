@@ -20,9 +20,9 @@ type ConsoleUI struct {
 	// Progress tracking fields
 	bar            *progressbar.ProgressBar
 	operation      string // "Sending" or "Receiving"
-	lastUpdateTime time.Time
 	totalBytes     uint64
 	startTime      time.Time
+	lastUpdateTime time.Time
 }
 
 // NewConsoleUI creates a new console-based interactive UI
@@ -85,7 +85,7 @@ func (c *ConsoleUI) initProgressBar() {
 	if c.bar != nil {
 		return // Already initialized
 	}
-	
+
 	// Create a placeholder progress bar that will be updated with actual size later
 	c.bar = progressbar.NewOptions64(-1, // Indeterminate progress initially
 		progressbar.OptionSetDescription(fmt.Sprintf("%s...", c.operation)),
@@ -107,9 +107,8 @@ func (c *ConsoleUI) handleProgressUpdates(progressCh <-chan transport.ProgressUp
 	for update := range progressCh {
 		c.updateProgress(update)
 
-		// Complete progress when transfer finishes
+		// Exit when transfer finishes (completion is handled in updateProgress)
 		if update.BytesSent > 0 && update.MetaData.Size > 0 && update.BytesSent >= uint64(update.MetaData.Size) {
-			c.completeProgress()
 			break
 		}
 	}
@@ -132,11 +131,11 @@ func (c *ConsoleUI) updateProgress(update transport.ProgressUpdate) {
 	}
 
 	now := time.Now()
-	
+
 	// Calculate percentage and throughput
 	percentage := float64(update.BytesSent) / float64(c.totalBytes) * 100.0
 	throughput := 0.0
-	
+
 	// Only calculate throughput if we have a valid start time and elapsed time
 	if !c.startTime.IsZero() && update.BytesSent > 0 {
 		elapsed := now.Sub(c.startTime)
@@ -146,22 +145,24 @@ func (c *ConsoleUI) updateProgress(update transport.ProgressUpdate) {
 	}
 
 	// Smart throttling: update more frequently for small files or quick transfers
+	isTinyFile := c.totalBytes < 1024       // Files smaller than 1KB
 	isSmallFile := c.totalBytes < 1024*1024 // 1MB
 	isQuickTransfer := false
 	if !c.startTime.IsZero() {
 		elapsed := now.Sub(c.startTime)
 		isQuickTransfer = elapsed < 2*time.Second
 	}
-	shouldUpdateFrequently := isSmallFile || isQuickTransfer
-	
+
 	updateInterval := time.Second
-	if shouldUpdateFrequently {
+	if isTinyFile {
+		updateInterval = 0 // Always update for tiny files
+	} else if isSmallFile || isQuickTransfer {
 		updateInterval = 200 * time.Millisecond
 	}
-	
+
 	timeSinceLastUpdate := now.Sub(c.lastUpdateTime)
 	isComplete := update.BytesSent >= c.totalBytes
-	
+
 	// Update display if enough time has passed or transfer is complete
 	if timeSinceLastUpdate >= updateInterval || isComplete || percentage == 0.0 {
 		// Update the progress bar with bytes sent (only if bar is initialized)
@@ -172,12 +173,15 @@ func (c *ConsoleUI) updateProgress(update transport.ProgressUpdate) {
 			throughputStr := fmt.Sprintf("%.2f MB/s", throughput)
 			c.bar.Describe(fmt.Sprintf("%s (%.1f%% - %s)", c.operation, percentage, throughputStr))
 		}
-		
+
 		c.lastUpdateTime = now
 	}
 
-	// Show summary only when transfer is complete
+	// Complete progress bar and show summary when transfer is complete
 	if isComplete {
+		// Finish the progress bar first
+		c.completeProgress()
+
 		elapsed := time.Duration(0)
 		if !c.startTime.IsZero() {
 			elapsed = now.Sub(c.startTime)
@@ -196,7 +200,7 @@ func (c *ConsoleUI) completeProgress() {
 
 // showTransferSummary displays a summary of the completed transfer
 func (c *ConsoleUI) showTransferSummary(update transport.ProgressUpdate, percentage, throughput float64, elapsed time.Duration) {
-	fmt.Printf("=============================================\n")
+	fmt.Printf("\n=============================================\n")
 	fmt.Printf("File transfer completed successfully!\n")
 	fmt.Printf("+ Total bytes sent: %s\n", utils.FormatFileSize(int64(update.BytesSent)))
 	fmt.Printf("+ Transfer time: %s\n", elapsed.Round(time.Millisecond))

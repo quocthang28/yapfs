@@ -37,9 +37,9 @@ func NewReceiverChannel(cfg *config.Config) *ReceiverChannel {
 // SetupFileReceiver sets up handlers for receiving files and returns completion and progress channels
 func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, destPath string) (<-chan struct{}, <-chan ProgressUpdate, error) {
 	doneCh := make(chan struct{})
-	progressCh := make(chan ProgressUpdate, 5) // Buffer progress updates
-	var doneOnce sync.Once                     // Ensure doneCh is closed only once
-	var progressOnce sync.Once                 // Ensure progressCh is closed only once
+	progressCh := make(chan ProgressUpdate, 50) // Buffer progress updates to match sender
+	var doneOnce sync.Once                      // Ensure doneCh is closed only once
+	var progressOnce sync.Once                  // Ensure progressCh is closed only once
 
 	// OnDataChannel sets an event handler which is invoked when a data channel message arrives from a remote peer.
 	peerConn.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
@@ -148,10 +148,16 @@ func (r *ReceiverChannel) handleMetadataMessage(msg webrtc.DataChannelMessage, c
 	r.bytesReceived = 0
 	r.fileMetadata = metadata
 
-	// Send initial progress
-	ctx.progressCh <- ProgressUpdate{
+	// Send initial progress (non-blocking)
+	select {
+	case ctx.progressCh <- ProgressUpdate{
 		BytesSent: 0,
 		MetaData:  *metadata,
+	}:
+		// Progress sent successfully
+	default:
+		// Progress channel full, skip this update
+		log.Printf("Progress channel full, skipping metadata progress update")
 	}
 
 	// Prepare file for receiving with metadata
@@ -175,14 +181,19 @@ func (r *ReceiverChannel) handleEOFMessage(_ webrtc.DataChannelMessage, ctx *Mes
 
 	log.Printf("File transfer complete: %d bytes received", totalBytes)
 
-	// Send final progress
+	// Send final progress (non-blocking)
 	update := ProgressUpdate{
 		BytesSent: r.bytesReceived,
 	}
 	if r.fileMetadata != nil {
 		update.MetaData = *r.fileMetadata
 	}
-	ctx.progressCh <- update
+	select {
+	case ctx.progressCh <- update:
+		// Progress sent successfully
+	default:
+		// Progress channel full, skip this update
+	}
 
 	// Close progress channel and signal completion
 	ctx.progressOnce.Do(func() { close(ctx.progressCh) })
@@ -214,5 +225,11 @@ func (r *ReceiverChannel) handleFileDataMessage(msg webrtc.DataChannelMessage, c
 	if r.fileMetadata != nil {
 		update.MetaData = *r.fileMetadata
 	}
-	ctx.progressCh <- update
+	// Non-blocking progress send to prevent data channel blocking
+	select {
+	case ctx.progressCh <- update:
+		// Progress sent successfully
+	default:
+		// Progress channel full, skip this update to avoid blocking data transfer
+	}
 }

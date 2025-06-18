@@ -42,6 +42,7 @@ func (s *SenderChannel) CreateFileSenderDataChannel(peerConn *webrtc.PeerConnect
 	}
 
 	s.dataChannel = dataChannel
+
 	return nil
 }
 
@@ -54,14 +55,14 @@ func (s *SenderChannel) SetupFileSender(ctx context.Context, filePath string) (<
 	// Flow control channel: signals when WebRTC buffer has space for more data
 	// Buffered (size 3) to handle multiple OnBufferedAmountLow events without blocking
 	sendMoreCh := make(chan struct{}, 3)
-	
+
 	// Completion signal channel: closed when file transfer finishes (success or error)
 	doneCh := make(chan struct{})
-	
+
 	// Progress updates channel: sends transfer statistics to UI layer
 	// Buffered to prevent blocking on progress reporting
 	progressCh := make(chan ProgressUpdate, 50)
-	
+
 	// Ensures doneCh is closed exactly once, preventing panic from multiple close attempts
 	var doneOnce sync.Once
 
@@ -119,14 +120,14 @@ func (s *SenderChannel) startFileTransfer(ctx context.Context, filePath string, 
 	defer close(progressCh) // Close progress channel when done
 
 	transferCtx := &FileTransferContext{
-		ctx:              ctx,
-		filePath:         filePath,
-		totalBytes:       totalBytes,
-		sendMoreCh:       sendMoreCh,
-		doneCh:           doneCh,
-		progressCh:       progressCh,
-		doneOnce:         doneOnce,
-		bytesSent: 0,
+		ctx:        ctx,
+		filePath:   filePath,
+		totalBytes: totalBytes,
+		sendMoreCh: sendMoreCh,
+		doneCh:     doneCh,
+		progressCh: progressCh,
+		doneOnce:   doneOnce,
+		bytesSent:  0,
 	}
 
 	// Send file metadata
@@ -147,7 +148,7 @@ func (s *SenderChannel) sendMetadataPhase(ctx *FileTransferContext) error {
 	if err != nil {
 		return fmt.Errorf("error creating file metadata: %w", err)
 	}
-	
+
 	metadata, err := s.dataProcessor.DecodeMetadata(metadataBytes)
 	if err != nil {
 		return fmt.Errorf("error decoding file metadata: %w", err)
@@ -156,7 +157,7 @@ func (s *SenderChannel) sendMetadataPhase(ctx *FileTransferContext) error {
 	// Store metadata in context for subsequent progress updates
 	ctx.metadata = metadata
 
-	// Send initial progress with metadata
+	// Send initial progress with metadata (non-blocking)
 	ctx.progressCh <- ProgressUpdate{
 		BytesSent: 0,
 		MetaData:  *metadata,
@@ -244,14 +245,20 @@ func (s *SenderChannel) sendEOFPhase(ctx *FileTransferContext) {
 		log.Printf("File transfer complete")
 	}
 
-	// Send final progress
+	// Send final progress (non-blocking)
 	update := ProgressUpdate{
 		BytesSent: ctx.bytesSent,
 	}
 	if ctx.metadata != nil {
 		update.MetaData = *ctx.metadata
 	}
-	ctx.progressCh <- update
+
+	select {
+	case ctx.progressCh <- update:
+		// Progress sent successfully
+	default:
+		// Progress channel full, skip this update
+	}
 
 	// Close the channel after sending EOF
 	err = s.dataChannel.GracefulClose()
@@ -271,7 +278,13 @@ func (s *SenderChannel) updateProgress(ctx *FileTransferContext) {
 	if ctx.metadata != nil {
 		update.MetaData = *ctx.metadata
 	}
-	ctx.progressCh <- update
+	// Non-blocking progress send to prevent data channel blocking
+	select {
+	case ctx.progressCh <- update:
+		// Progress sent successfully
+	default:
+		// Progress channel full, skip this update to avoid blocking data transfer
+	}
 }
 
 // handleFlowControl manages flow control and backpressure
