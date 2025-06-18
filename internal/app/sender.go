@@ -40,6 +40,7 @@ func NewSenderApp(
 		peerService:        peerService,
 		dataChannelService: dataChannelService,
 		signalingService:   signalingService,
+		ui:                 ui.NewConsoleUI("Sending"),
 	}
 }
 
@@ -74,10 +75,6 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 
 	// Single cleanup function
 	cleanup := func(sessionID string) {
-		if err := s.dataChannelService.Close(); err != nil {
-			log.Printf("Error closing data channel service: %v", err)
-		}
-
 		if err := peerConn.Close(); err != nil {
 			log.Printf("Error closing peer connection: %v", err)
 		}
@@ -113,8 +110,7 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	}
 
 	// Start updating progress on UI
-	consoleUI := ui.NewConsoleUI("Sending")
-	go consoleUI.StartUpdatingSenderProgress(progressCh)
+	go s.ui.StartUpdatingSenderProgress(progressCh)
 
 	// Wait for any exit condition
 	var exitErr error

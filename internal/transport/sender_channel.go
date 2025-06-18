@@ -97,6 +97,21 @@ func (s *SenderChannel) SetupFileSender(ctx context.Context, filePath string) (<
 		}
 	})
 
+	s.dataChannel.OnClose(func() {
+		log.Printf("File transfer data channel closed")
+		// Clean up any open files
+		s.dataProcessor.Close()
+		// Close progress channel if not already closed
+		doneOnce.Do(func() { close(progressCh) })
+	})
+
+	s.dataChannel.OnError(func(err error) {
+		log.Printf("File transfer data channel error: %v", err)
+		s.dataProcessor.Close()
+		// Close progress channel if not already closed
+		doneOnce.Do(func() { close(progressCh) })
+	})
+
 	return doneCh, progressCh, nil
 }
 
@@ -320,13 +335,5 @@ func (s *SenderChannel) sendFileMetaData(filePath string) error {
 		return fmt.Errorf("error sending metadata: %w", err)
 	}
 
-	return nil
-}
-
-// Close cleans up the SenderChannel resources
-func (s *SenderChannel) Close() error {
-	if s.dataProcessor != nil {
-		return s.dataProcessor.Close()
-	}
 	return nil
 }

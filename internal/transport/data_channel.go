@@ -2,7 +2,6 @@ package transport
 
 import (
 	"context"
-	"fmt"
 
 	"yapfs/internal/config"
 
@@ -37,27 +36,4 @@ func (d *DataChannelService) SetupFileSender(ctx context.Context, filePath strin
 // SetupFileReceiver sets up handlers for receiving files and returns completion and progress channels
 func (d *DataChannelService) SetupFileReceiver(peerConn *webrtc.PeerConnection, destPath string) (<-chan struct{}, <-chan ProgressUpdate, error) {
 	return d.receiver.SetupFileReceiver(peerConn, destPath)
-}
-
-// ClearPartialFile removes any partially written file (delegates to receiver)
-func (d *DataChannelService) ClearPartialFile() error {
-	return d.receiver.ClearPartialFile()
-}
-
-// Close cleans up the DataChannelService resources
-func (d *DataChannelService) Close() error {
-	var errs []error
-
-	if err := d.sender.Close(); err != nil {
-		errs = append(errs, err)
-	}
-
-	if err := d.receiver.Close(); err != nil {
-		errs = append(errs, err)
-	}
-
-	if len(errs) > 0 {
-		return fmt.Errorf("errors closing data channel service: %v", errs)
-	}
-	return nil
 }

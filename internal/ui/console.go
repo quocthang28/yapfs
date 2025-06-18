@@ -97,13 +97,11 @@ func (c *ConsoleUI) initProgressBar() {
 		progressbar.OptionSetWriter(os.Stderr),
 		progressbar.OptionShowBytes(true),
 		progressbar.OptionSetWidth(50),
-		progressbar.OptionThrottle(100*time.Millisecond),
+		progressbar.OptionThrottle(200*time.Millisecond),
 		progressbar.OptionShowCount(),
 		progressbar.OptionSpinnerType(14),
-		progressbar.OptionFullWidth(),
-		progressbar.OptionSetRenderBlankState(true),
-		progressbar.OptionShowElapsedTimeOnFinish(),
-		progressbar.OptionSetPredictTime(false),
+		progressbar.OptionSetRenderBlankState(false),
+		progressbar.OptionClearOnFinish(),
 	)
 }
 
@@ -191,6 +189,7 @@ func (c *ConsoleUI) updateProgress(update transport.ProgressUpdate) {
 		if !c.startTime.IsZero() {
 			elapsed = now.Sub(c.startTime)
 		}
+		
 		c.showTransferSummary(update, percentage, throughput, elapsed)
 	}
 }
@@ -205,7 +204,7 @@ func (c *ConsoleUI) completeProgress() {
 
 // showTransferSummary displays a summary of the completed transfer
 func (c *ConsoleUI) showTransferSummary(update transport.ProgressUpdate, percentage, throughput float64, elapsed time.Duration) {
-	fmt.Printf("\n=============================================\n")
+	fmt.Printf("\n\n=============================================\n")
 	fmt.Printf("File transfer completed successfully!\n")
 	fmt.Printf("+ Total bytes sent: %s\n", utils.FormatFileSize(int64(update.BytesSent)))
 	fmt.Printf("+ Transfer time: %s\n", elapsed.Round(time.Millisecond))

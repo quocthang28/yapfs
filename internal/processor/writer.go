@@ -110,5 +110,8 @@ func (w *writerService) finishWriting(writer *fileWriter) (uint64, error) {
 
 // close closes the internal file writer
 func (fw *fileWriter) close() error {
+	if fw.file == nil {
+		return nil
+	}
 	return fw.file.Close()
 }

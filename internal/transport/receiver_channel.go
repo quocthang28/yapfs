@@ -81,14 +81,6 @@ func (r *ReceiverChannel) ClearPartialFile() error {
 	return nil
 }
 
-// Close cleans up the ReceiverChannel resources
-func (r *ReceiverChannel) Close() error {
-	if r.dataProcessor != nil {
-		return r.dataProcessor.Close()
-	}
-	return nil
-}
-
 func (r *ReceiverChannel) processMetaData(msg []byte) (*processor.FileMetadata, error) {
 	metadataBytes := msg[9:] // Remove "METADATA:" prefix
 	metadata, err := r.dataProcessor.DecodeMetadata(metadataBytes)

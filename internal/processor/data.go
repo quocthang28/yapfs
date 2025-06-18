@@ -180,7 +180,7 @@ func (d *DataProcessor) Close() error {
 	}
 
 	if d.currentWriter != nil {
-		if err := d.currentWriter.close(); err != nil {
+		if err := d.ClearPartialFile(); err != nil {
 			errs = append(errs, err)
 		}
 		d.currentWriter = nil
