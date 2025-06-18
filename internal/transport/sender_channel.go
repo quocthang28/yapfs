@@ -17,17 +17,17 @@ type SenderChannel struct {
 	config        *config.Config
 	dataChannel   *webrtc.DataChannel
 	dataProcessor *processor.DataProcessor
-	
+
 	// Transfer state
 	ctx        context.Context
 	filePath   string
 	totalBytes uint64
 	metadata   *processor.FileMetadata
 	bytesSent  uint64
-	
+
 	// Channels
 	bufferControlCh chan struct{}
-	progressCh chan ProgressUpdate
+	progressCh      chan ProgressUpdate
 }
 
 // NewSenderChannel creates a new data channel sender
@@ -77,12 +77,12 @@ func (s *SenderChannel) SetupFileSender(ctx context.Context, filePath string) (<
 
 	// Get file size and create metadata once
 	s.totalBytes = uint64(s.dataProcessor.GetCurrentFileSize())
-	
+
 	metadataBytes, err := s.dataProcessor.CreateFileMetadata(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create file metadata: %w", err)
 	}
-	
+
 	s.metadata, err = s.dataProcessor.DecodeMetadata(metadataBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode file metadata: %w", err)
@@ -141,7 +141,6 @@ func (s *SenderChannel) SendFile() error {
 	// Start file data transfer
 	return s.sendFileDataPhase()
 }
-
 
 // sendMetadataPhase handles sending file metadata
 func (s *SenderChannel) sendMetadataPhase() error {
@@ -219,7 +218,7 @@ func (s *SenderChannel) sendEOFPhase() error {
 	if err != nil {
 		return fmt.Errorf("error sending EOF: %v", err)
 	}
-	
+
 	log.Printf("File transfer complete")
 
 	// Send final progress (non-blocking)

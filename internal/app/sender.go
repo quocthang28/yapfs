@@ -113,7 +113,7 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 
 	// Create transfer completion channel
 	transferDone := make(chan error, 1)
-	
+
 	// Start file transfer in background
 	go func() {
 		transferDone <- s.dataChannelService.SendFile()

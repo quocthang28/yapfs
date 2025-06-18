@@ -189,7 +189,7 @@ func (c *ConsoleUI) updateProgress(update transport.ProgressUpdate) {
 		if !c.startTime.IsZero() {
 			elapsed = now.Sub(c.startTime)
 		}
-		
+
 		c.showTransferSummary(update, percentage, throughput, elapsed)
 	}
 }
