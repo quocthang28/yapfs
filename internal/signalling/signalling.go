@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 
 	"yapfs/internal/config"
 	"yapfs/pkg/utils"
@@ -12,42 +11,63 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-// SignalingService orchestrates the complete signaling flow
+// SignalingServer defines the interface for signaling storage operations
+type SignalingServer interface {
+	CreateSession(ctx context.Context, offer string) (sessionID string, err error)
+	GetOffer(ctx context.Context, sessionID string) (offer string, err error)
+	UpdateAnswer(ctx context.Context, sessionID, answer string) error
+	WaitForAnswer(ctx context.Context, sessionID string) (answer string, err error)
+	DeleteSession(ctx context.Context, sessionID string) error
+}
+
+// SDPHandler defines the interface for WebRTC SDP operations
+type SDPHandler interface {
+	CreateOffer(peerConn *webrtc.PeerConnection) (*webrtc.SessionDescription, error)
+	CreateAnswer(peerConn *webrtc.PeerConnection) (*webrtc.SessionDescription, error)
+	WaitForICEGathering(ctx context.Context, peerConn *webrtc.PeerConnection) error
+}
+
+// SDPEncoder defines the interface for SDP encoding
+type SDPEncoder func(webrtc.SessionDescription) (string, error)
+
+// SDPDecoder defines the interface for SDP decoding
+type SDPDecoder func(string) (webrtc.SessionDescription, error)
+
+// SignalingService orchestrates the complete signaling flow using composition
 type SignalingService struct {
-	sessionService *SessionService
+	server SignalingServer
+	sdp    SDPHandler
 }
 
-// NewSignalingService creates a new signaling service
-func NewSignalingService(cfg *config.Config) *SignalingService {
-	// Initialize Firebase client
-	client, err := NewClient(context.Background(), &cfg.Firebase)
-	if err != nil {
-		fmt.Printf("Error: Failed to initialize Firebase client: %v\n", err)
-		fmt.Println("Firebase is required for automated SDP exchange. Please check your credentials file and configuration.")
-		os.Exit(1)
-	}
-
-	sessionService := client.NewSessionService()
-
+func NewSignalingService(server SignalingServer, sdp SDPHandler) *SignalingService {
 	return &SignalingService{
-		sessionService: sessionService,
+		server: server,
+		sdp:    sdp,
 	}
 }
 
-// StartSenderSignallingProcess orchestrates the complete sender signaling flow
+func NewDefaultSignalingService(cfg *config.Config) (*SignalingService, error) {
+	server, err := NewFirebaseClient(context.Background(), &cfg.Firebase)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize Firebase cilent: %w", err)
+	}
+
+	sdp := &WebRTCHandler{}
+
+	return NewSignalingService(server, sdp), nil
+}
+
 func (s *SignalingService) StartSenderSignallingProcess(ctx context.Context, peerConn *webrtc.PeerConnection) (string, error) {
-	// Create offer
-	_, err := s.CreateOffer(peerConn)
+	// Create offer using SDP handler
+	_, err := s.sdp.CreateOffer(peerConn)
 	if err != nil {
 		return "", fmt.Errorf("failed to create offer: %w", err)
 	}
 
 	// Wait for ICE gathering to complete
-	select {
-	case <-webrtc.GatheringCompletePromise(peerConn):
-		break
-	case <-ctx.Done():
-		return "", ctx.Err()
+	err = s.sdp.WaitForICEGathering(ctx, peerConn)
+	if err != nil {
+		return "", fmt.Errorf("failed to wait for ICE gathering: %w", err)
 	}
 
 	// Get the final offer with ICE candidates
@@ -62,24 +82,23 @@ func (s *SignalingService) StartSenderSignallingProcess(ctx context.Context, pee
 		return "", fmt.Errorf("failed to encode offer SDP: %w", err)
 	}
 
-	// Upload session with offer to Firebase
-	sessionID, err := s.sessionService.createSessionWithOffer(encodedOffer)
+	// Create session with offer using backend
+	sessionID, err := s.server.CreateSession(ctx, encodedOffer)
 	if err != nil {
 		return "", fmt.Errorf("failed to create session with offer: %w", err)
 	}
 
-	log.Printf("Share this code with the receiver: %s\n", sessionID)
+	log.Printf("Send this code to the receiver: %s\n", sessionID)
 
 	// Wait for answer from remote peer
-	answer, err := s.sessionService.checkForAnswer(ctx, sessionID)
+	answer, err := s.server.WaitForAnswer(ctx, sessionID)
 	if err != nil {
-		log.Printf("Error occurred: %s\n", err)
-		return sessionID, err
+		return sessionID, fmt.Errorf("failed to wait for answer: %w", err)
 	}
 
 	answerSD, err := utils.DecodeSessionDescription(answer)
 	if err != nil {
-		return sessionID, err
+		return sessionID, fmt.Errorf("failed to decode answer SDP: %w", err)
 	}
 
 	err = peerConn.SetRemoteDescription(answerSD)
@@ -92,8 +111,8 @@ func (s *SignalingService) StartSenderSignallingProcess(ctx context.Context, pee
 
 // StartReceiverSignallingProcess orchestrates the complete receiver signaling flow
 func (s *SignalingService) StartReceiverSignallingProcess(ctx context.Context, peerConn *webrtc.PeerConnection, sessionID string) error {
-	// Get the offer from the session
-	encodedOffer, err := s.sessionService.getOffer(sessionID)
+	// Get the offer from the session using backend
+	encodedOffer, err := s.server.GetOffer(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to get offer from session: %w", err)
 	}
@@ -110,18 +129,16 @@ func (s *SignalingService) StartReceiverSignallingProcess(ctx context.Context, p
 		return fmt.Errorf("failed to set remote description: %w", err)
 	}
 
-	// Create answer
-	_, err = s.CreateAnswer(peerConn)
+	// Create answer using SDP handler
+	_, err = s.sdp.CreateAnswer(peerConn)
 	if err != nil {
 		return fmt.Errorf("failed to create answer: %w", err)
 	}
 
 	// Wait for ICE gathering to complete
-	select {
-	case <-webrtc.GatheringCompletePromise(peerConn):
-		break
-	case <-ctx.Done():
-		return ctx.Err()
+	err = s.sdp.WaitForICEGathering(ctx, peerConn)
+	if err != nil {
+		return fmt.Errorf("failed to wait for ICE gathering: %w", err)
 	}
 
 	// Get the final answer with ICE candidates
@@ -136,17 +153,20 @@ func (s *SignalingService) StartReceiverSignallingProcess(ctx context.Context, p
 		return fmt.Errorf("failed to encode answer SDP: %w", err)
 	}
 
-	// Upload answer to Firebase
-	err = s.sessionService.updateAnswer(sessionID, encodedAnswer)
+	// Upload answer using backend
+	err = s.server.UpdateAnswer(ctx, sessionID, encodedAnswer)
 	if err != nil {
-		return fmt.Errorf("failed to upload answer to Firebase: %w", err)
+		return fmt.Errorf("failed to upload answer: %w", err)
 	}
 
 	return nil
 }
 
+// WebRTCHandler implements SDPHandler for WebRTC operations
+type WebRTCHandler struct{}
+
 // CreateOffer creates and sets an SDP offer for the peer connection
-func (s *SignalingService) CreateOffer(peerConn *webrtc.PeerConnection) (*webrtc.SessionDescription, error) {
+func (h *WebRTCHandler) CreateOffer(peerConn *webrtc.PeerConnection) (*webrtc.SessionDescription, error) {
 	offer, err := peerConn.CreateOffer(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create offer: %w", err)
@@ -161,7 +181,7 @@ func (s *SignalingService) CreateOffer(peerConn *webrtc.PeerConnection) (*webrtc
 }
 
 // CreateAnswer creates and sets an SDP answer for the peer connection
-func (s *SignalingService) CreateAnswer(peerConn *webrtc.PeerConnection) (*webrtc.SessionDescription, error) {
+func (h *WebRTCHandler) CreateAnswer(peerConn *webrtc.PeerConnection) (*webrtc.SessionDescription, error) {
 	answer, err := peerConn.CreateAnswer(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create answer: %w", err)
@@ -175,7 +195,17 @@ func (s *SignalingService) CreateAnswer(peerConn *webrtc.PeerConnection) (*webrt
 	return &answer, nil
 }
 
-// ClearSession deletes a Firebase session by its ID
-func (s *SignalingService) ClearSession(sessionID string) error {
-	return s.sessionService.deleteSession(sessionID)
+// WaitForICEGathering waits for ICE gathering to complete
+func (h *WebRTCHandler) WaitForICEGathering(ctx context.Context, peerConn *webrtc.PeerConnection) error {
+	select {
+	case <-webrtc.GatheringCompletePromise(peerConn):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// ClearSession deletes a session by its ID
+func (s *SignalingService) ClearSession(ctx context.Context, sessionID string) error {
+	return s.server.DeleteSession(ctx, sessionID)
 }

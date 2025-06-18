@@ -97,10 +97,8 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 		}
 
 		if code != "" {
-			if err := r.signalingService.ClearSession(code); err != nil {
+			if err := r.signalingService.ClearSession(ctx, code); err != nil {
 				log.Printf("Warning: Failed to clear Firebase session: %v", err)
-			} else {
-				log.Printf("Firebase session cleared successfully")
 			}
 		}
 	}

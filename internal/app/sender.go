@@ -87,10 +87,8 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 		}
 
 		if sessionID != "" {
-			if err := s.signalingService.ClearSession(sessionID); err != nil {
+			if err := s.signalingService.ClearSession(ctx, sessionID); err != nil {
 				log.Printf("Warning: Failed to clear Firebase session: %v", err)
-			} else {
-				log.Printf("Firebase session cleared successfully")
 			}
 		}
 	}
@@ -114,7 +112,7 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	doneCh, progressCh, err := s.dataChannelService.SetupFileSender(ctx, opts.FilePath)
 	if err != nil {
 		cleanup(sessionID)
-		
+
 		return fmt.Errorf("failed to setup file sender: %w", err)
 	}
 

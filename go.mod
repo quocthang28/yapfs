@@ -5,6 +5,7 @@ go 1.24.2
 require (
 	firebase.google.com/go/v4 v4.16.1
 	github.com/pion/webrtc/v4 v4.1.1
+	github.com/schollz/progressbar/v3 v3.18.0
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/viper v1.20.1
 	google.golang.org/api v0.236.0
@@ -62,7 +63,6 @@ require (
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sagikazarmark/locafero v0.7.0 // indirect
-	github.com/schollz/progressbar/v3 v3.18.0 // indirect
 	github.com/sourcegraph/conc v0.3.0 // indirect
 	github.com/spf13/afero v1.12.0 // indirect
 	github.com/spf13/cast v1.7.1 // indirect

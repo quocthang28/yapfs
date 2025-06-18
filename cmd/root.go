@@ -14,7 +14,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"github.com/subosito/gotenv"
 )
 
 var (
@@ -38,8 +37,6 @@ Usage:
 
 Both peers will exchange SDP offers/answers manually to establish the connection.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		// Load .env file if it exists
-		gotenv.Load(".env")
 
 		// Initialize viper configuration
 		initConfig()
@@ -137,7 +134,11 @@ func createContext() context.Context {
 // createServices creates and wires up all the application services
 func createServices() (*transport.PeerService, *transport.DataChannelService, *signalling.SignalingService, *ui.ConsoleUI) {
 	// Create services
-	signalingService := signalling.NewSignalingService(cfg)
+	signalingService, err := signalling.NewDefaultSignalingService(cfg)
+	if err != nil {
+		log.Fatalf("Failed to create signaling service: %v", err)
+	}
+
 	peerService := transport.NewPeerService(cfg)
 	consoleUI := ui.NewConsoleUI()
 	dataChannelService := transport.NewDataChannelService(cfg)
