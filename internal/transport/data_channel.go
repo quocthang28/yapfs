@@ -29,8 +29,13 @@ func (d *DataChannelService) CreateFileSenderDataChannel(peerConn *webrtc.PeerCo
 }
 
 // SetupFileSender configures file sending with progress reporting
-func (d *DataChannelService) SetupFileSender(ctx context.Context, filePath string) (<-chan struct{}, <-chan ProgressUpdate, error) {
+func (d *DataChannelService) SetupFileSender(ctx context.Context, filePath string) (<-chan ProgressUpdate, error) {
 	return d.sender.SetupFileSender(ctx, filePath)
+}
+
+// SendFile performs a blocking file transfer (call this after connection is established)
+func (d *DataChannelService) SendFile() error {
+	return d.sender.SendFile()
 }
 
 // SetupFileReceiver sets up handlers for receiving files and returns completion and progress channels

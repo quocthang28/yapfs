@@ -102,22 +102,28 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	}
 
 	// Setup file sender
-	doneCh, progressCh, err := s.dataChannelService.SetupFileSender(ctx, opts.FilePath)
+	progressCh, err := s.dataChannelService.SetupFileSender(ctx, opts.FilePath)
 	if err != nil {
 		cleanup(sessionID)
-
 		return fmt.Errorf("failed to setup file sender: %w", err)
 	}
 
 	// Start updating progress on UI
 	go s.ui.StartUpdatingSenderProgress(progressCh)
 
+	// Create transfer completion channel
+	transferDone := make(chan error, 1)
+	
+	// Start file transfer in background
+	go func() {
+		transferDone <- s.dataChannelService.SendFile()
+	}()
+
 	// Wait for any exit condition
 	var exitErr error
-
 	select {
-	case <-doneCh:
-		// Transfer completed successfully
+	case exitErr = <-transferDone:
+		// Transfer completed (successfully or with error)
 	case <-ctx.Done():
 		exitErr = ctx.Err()
 	case exitErr = <-exitCh:
@@ -125,6 +131,5 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	}
 
 	cleanup(sessionID)
-
 	return exitErr
 }
