@@ -142,23 +142,11 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	}
 
 	cleanup(code)
+	
 	return exitErr
 }
 
 func (r *ReceiverApp) updateProgress(progressCh <-chan transport.ProgressUpdate) {
-	progressUI := ui.NewProgressUI()
-
-	var started bool
-	for update := range progressCh {
-		if !started {
-			progressUI.StartProgressReceiving(update.MetaData.Name, update.BytesTotal)
-			started = true
-		}
-		progressUI.UpdateProgress(update)
-
-		// Complete progress when transfer finishes
-		if update.Percentage >= 100.0 {
-			progressUI.CompleteProgress()
-		}
-	}
+	consoleUI := ui.NewConsoleUI()
+	consoleUI.StartReceiving(progressCh)
 }

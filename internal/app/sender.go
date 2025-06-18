@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"path/filepath"
 
 	"yapfs/internal/config"
 	"yapfs/internal/signalling"
@@ -110,7 +109,7 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 		return fmt.Errorf("failed during signalling process: %w", err)
 	}
 
-	// Setup file sender with progress
+	// Setup file sender
 	doneCh, progressCh, err := s.dataChannelService.SetupFileSender(ctx, opts.FilePath)
 	if err != nil {
 		cleanup(sessionID)
@@ -118,7 +117,7 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	}
 
 	// Start updating progress on UI
-	go s.updateProgress(opts, progressCh)
+	go s.updateProgress(progressCh)
 
 	// Wait for any exit condition
 	var exitErr error
@@ -132,24 +131,11 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	}
 
 	cleanup(sessionID)
+	
 	return exitErr
 }
 
-func (s *SenderApp) updateProgress(opts *SenderOptions, progressCh <-chan transport.ProgressUpdate) {
-	progressUI := ui.NewProgressUI()
-	filename := filepath.Base(opts.FilePath)
-
-	var started bool
-	for update := range progressCh {
-		if !started {
-			progressUI.StartProgressSending(filename, update.BytesTotal)
-			started = true
-		}
-		progressUI.UpdateProgress(update)
-
-		// Complete progress when transfer finishes
-		if update.Percentage >= 100.0 {
-			progressUI.CompleteProgress()
-		}
-	}
+func (s *SenderApp) updateProgress(progressCh <-chan transport.ProgressUpdate) {
+	consoleUI := ui.NewConsoleUI()
+	consoleUI.StartSending(progressCh)
 }

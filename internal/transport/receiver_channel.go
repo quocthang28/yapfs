@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"sync"
-	"time"
 
 	"yapfs/internal/config"
 	"yapfs/internal/processor"
@@ -21,11 +20,9 @@ type ReceiverChannel struct {
 	metadataReceived bool // Track if metadata has been received
 
 	// Progress tracking
-	totalBytes     uint64
-	bytesReceived  uint64
-	startTime      time.Time
-	lastUpdateTime time.Time
-	fileMetadata   *processor.FileMetadata
+	totalBytes    uint64
+	bytesReceived uint64
+	fileMetadata  *processor.FileMetadata
 }
 
 // NewReceiverChannel creates a new data channel receiver
@@ -51,9 +48,6 @@ func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, des
 
 		r.dataChannel.OnOpen(func() {
 			log.Printf("File transfer data channel opened: %s-%d. Waiting for metadata...", r.dataChannel.Label(), r.dataChannel.ID())
-			// Initialize progress tracking
-			r.startTime = time.Now()
-			r.lastUpdateTime = r.startTime
 		})
 
 		r.dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
@@ -156,12 +150,8 @@ func (r *ReceiverChannel) handleMetadataMessage(msg webrtc.DataChannelMessage, c
 
 	// Send initial progress
 	ctx.progressCh <- ProgressUpdate{
-		BytesSent:   0,
-		BytesTotal:  r.totalBytes,
-		Percentage:  0.0,
-		Throughput:  0.0,
-		ElapsedTime: 0,
-		MetaData:    *metadata,
+		BytesSent: 0,
+		MetaData:  *metadata,
 	}
 
 	// Prepare file for receiving with metadata
@@ -186,14 +176,8 @@ func (r *ReceiverChannel) handleEOFMessage(_ webrtc.DataChannelMessage, ctx *Mes
 	log.Printf("File transfer complete: %d bytes received", totalBytes)
 
 	// Send final progress
-	elapsed := time.Since(r.startTime)
-	avgThroughput := float64(r.bytesReceived) / elapsed.Seconds() / (1024 * 1024) // MB/s
 	update := ProgressUpdate{
-		BytesSent:   r.bytesReceived,
-		BytesTotal:  r.totalBytes,
-		Percentage:  100.0,
-		Throughput:  avgThroughput,
-		ElapsedTime: elapsed,
+		BytesSent: r.bytesReceived,
 	}
 	if r.fileMetadata != nil {
 		update.MetaData = *r.fileMetadata
@@ -223,25 +207,12 @@ func (r *ReceiverChannel) handleFileDataMessage(msg webrtc.DataChannelMessage, c
 	// Update progress tracking
 	r.bytesReceived += uint64(len(msg.Data))
 
-	// Send progress update every second but not when transfer is complete (EOF handles that)
-	now := time.Now()
-	if now.Sub(r.lastUpdateTime) >= time.Second && r.bytesReceived < r.totalBytes {
-		elapsed := now.Sub(r.startTime)
-		percentage := float64(r.bytesReceived) / float64(r.totalBytes) * 100.0
-		throughput := float64(r.bytesReceived) / elapsed.Seconds() / (1024 * 1024) // MB/s
-
-		update := ProgressUpdate{
-			BytesSent:   r.bytesReceived,
-			BytesTotal:  r.totalBytes,
-			Percentage:  percentage,
-			Throughput:  throughput,
-			ElapsedTime: elapsed,
-		}
-		if r.fileMetadata != nil {
-			update.MetaData = *r.fileMetadata
-		}
-		ctx.progressCh <- update
-
-		r.lastUpdateTime = now
+	// Send raw progress update (UI layer handles calculations and throttling)
+	update := ProgressUpdate{
+		BytesSent: r.bytesReceived,
 	}
+	if r.fileMetadata != nil {
+		update.MetaData = *r.fileMetadata
+	}
+	ctx.progressCh <- update
 }

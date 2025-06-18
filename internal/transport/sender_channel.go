@@ -59,8 +59,8 @@ func (s *SenderChannel) SetupFileSender(ctx context.Context, filePath string) (<
 	doneCh := make(chan struct{})
 	
 	// Progress updates channel: sends transfer statistics to UI layer
-	// Buffered (size 5) to prevent blocking on progress reporting
-	progressCh := make(chan ProgressUpdate, 5)
+	// Buffered to prevent blocking on progress reporting
+	progressCh := make(chan ProgressUpdate, 50)
 	
 	// Ensures doneCh is closed exactly once, preventing panic from multiple close attempts
 	var doneOnce sync.Once
@@ -110,9 +110,8 @@ type FileTransferContext struct {
 	doneOnce   *sync.Once
 
 	// Progress tracking
-	bytesSent        uint64
-	startTime        time.Time
-	lastProgressTime time.Time
+	bytesSent uint64
+	metadata  *processor.FileMetadata
 }
 
 // startFileTransfer manages the complete file transfer process
@@ -127,9 +126,7 @@ func (s *SenderChannel) startFileTransfer(ctx context.Context, filePath string, 
 		doneCh:           doneCh,
 		progressCh:       progressCh,
 		doneOnce:         doneOnce,
-		bytesSent:        0,
-		startTime:        time.Now(),
-		lastProgressTime: time.Now(),
+		bytesSent: 0,
 	}
 
 	// Send file metadata
@@ -145,13 +142,24 @@ func (s *SenderChannel) startFileTransfer(ctx context.Context, filePath string, 
 
 // sendMetadataPhase handles sending file metadata
 func (s *SenderChannel) sendMetadataPhase(ctx *FileTransferContext) error {
-	// Send initial progress
+	// Create metadata for progress update
+	metadataBytes, err := s.dataProcessor.CreateFileMetadata(ctx.filePath)
+	if err != nil {
+		return fmt.Errorf("error creating file metadata: %w", err)
+	}
+	
+	metadata, err := s.dataProcessor.DecodeMetadata(metadataBytes)
+	if err != nil {
+		return fmt.Errorf("error decoding file metadata: %w", err)
+	}
+
+	// Store metadata in context for subsequent progress updates
+	ctx.metadata = metadata
+
+	// Send initial progress with metadata
 	ctx.progressCh <- ProgressUpdate{
-		BytesSent:   0,
-		BytesTotal:  ctx.totalBytes,
-		Percentage:  0.0,
-		Throughput:  0.0,
-		ElapsedTime: 0,
+		BytesSent: 0,
+		MetaData:  *metadata,
 	}
 
 	return s.sendFileMetaData(ctx.filePath)
@@ -191,10 +199,17 @@ func (s *SenderChannel) sendFileDataPhase(ctx *FileTransferContext) {
 				return // Flow control timeout or cancellation
 			}
 
-		case err := <-errCh:
-			log.Printf("Error during file transfer: %v", err)
-			ctx.doneOnce.Do(func() { close(ctx.doneCh) })
-			return
+		case err, ok := <-errCh:
+			if !ok {
+				// Error channel closed, no more errors expected
+				return
+			}
+			if err != nil {
+				log.Printf("Error during file transfer: %v", err)
+				ctx.doneOnce.Do(func() { close(ctx.doneCh) })
+				return
+			}
+
 		case <-ctx.ctx.Done():
 			log.Printf("File transfer cancelled: %v", ctx.ctx.Err())
 			ctx.doneOnce.Do(func() { close(ctx.doneCh) })
@@ -230,15 +245,13 @@ func (s *SenderChannel) sendEOFPhase(ctx *FileTransferContext) {
 	}
 
 	// Send final progress
-	elapsed := time.Since(ctx.startTime)
-	avgThroughput := float64(ctx.bytesSent) / elapsed.Seconds() / (1024 * 1024) // MB/s
-	ctx.progressCh <- ProgressUpdate{
-		BytesSent:   ctx.bytesSent,
-		BytesTotal:  ctx.totalBytes,
-		Percentage:  100.0,
-		Throughput:  avgThroughput,
-		ElapsedTime: elapsed,
+	update := ProgressUpdate{
+		BytesSent: ctx.bytesSent,
 	}
+	if ctx.metadata != nil {
+		update.MetaData = *ctx.metadata
+	}
+	ctx.progressCh <- update
 
 	// Close the channel after sending EOF
 	err = s.dataChannel.GracefulClose()
@@ -249,24 +262,16 @@ func (s *SenderChannel) sendEOFPhase(ctx *FileTransferContext) {
 	ctx.doneOnce.Do(func() { close(ctx.doneCh) })
 }
 
-// updateProgress sends progress updates at appropriate intervals
+// updateProgress sends raw progress data (UI layer handles calculations)
 func (s *SenderChannel) updateProgress(ctx *FileTransferContext) {
-	now := time.Now()
-	if now.Sub(ctx.lastProgressTime) >= time.Second && ctx.bytesSent < ctx.totalBytes {
-		elapsed := now.Sub(ctx.startTime)
-		percentage := float64(ctx.bytesSent) / float64(ctx.totalBytes) * 100.0
-		throughput := float64(ctx.bytesSent) / elapsed.Seconds() / (1024 * 1024) // MB/s
-
-		ctx.progressCh <- ProgressUpdate{
-			BytesSent:   ctx.bytesSent,
-			BytesTotal:  ctx.totalBytes,
-			Percentage:  percentage,
-			Throughput:  throughput,
-			ElapsedTime: elapsed,
-		}
-
-		ctx.lastProgressTime = now
+	// Send raw progress data - let UI decide when/how to display
+	update := ProgressUpdate{
+		BytesSent: ctx.bytesSent,
 	}
+	if ctx.metadata != nil {
+		update.MetaData = *ctx.metadata
+	}
+	ctx.progressCh <- update
 }
 
 // handleFlowControl manages flow control and backpressure
