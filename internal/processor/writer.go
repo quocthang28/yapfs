@@ -8,6 +8,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+
+	"yapfs/pkg/types"
 )
 
 // writerService handles file writing operations
@@ -27,12 +29,12 @@ type fileWriter struct {
 	file              *os.File
 	destPath          string
 	totalBytesWritten uint64
-	metadata          *FileMetadata // Metadata of the file being received
+	metadata          *types.FileMetadata // Metadata of the file being received
 	hash              hash.Hash     // SHA-256 hash for checksum validation
 }
 
 // prepareFileForWriting opens a destination file for writing with metadata
-func (w *writerService) prepareFileForWriting(destDir string, metadata *FileMetadata) (*fileWriter, string, error) {
+func (w *writerService) prepareFileForWriting(destDir string, metadata *types.FileMetadata) (*fileWriter, string, error) {
 	// Ensure destination directory exists
 	if err := w.fileService.ensureDir(destDir); err != nil {
 		return nil, "", fmt.Errorf("failed to create destination directory: %w", err)

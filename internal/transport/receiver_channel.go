@@ -8,6 +8,8 @@ import (
 
 	"yapfs/internal/config"
 	"yapfs/internal/processor"
+	"yapfs/pkg/types"
+	"yapfs/pkg/utils"
 
 	"github.com/pion/webrtc/v4"
 )
@@ -22,7 +24,7 @@ type ReceiverChannel struct {
 	// Progress tracking
 	totalBytes    uint64
 	bytesReceived uint64
-	fileMetadata  *processor.FileMetadata
+	fileMetadata  *types.FileMetadata
 }
 
 // NewReceiverChannel creates a new data channel receiver
@@ -35,11 +37,11 @@ func NewReceiverChannel(cfg *config.Config) *ReceiverChannel {
 }
 
 // SetupFileReceiver sets up handlers for receiving files and returns completion and progress channels
-func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, destPath string) (<-chan struct{}, <-chan ProgressUpdate, error) {
+func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, destPath string) (<-chan struct{}, <-chan types.ProgressUpdate, error) {
 	doneCh := make(chan struct{})
-	progressCh := make(chan ProgressUpdate, 50) // Buffer progress updates to match sender
-	var doneOnce sync.Once                      // Ensure doneCh is closed only once
-	var progressOnce sync.Once                  // Ensure progressCh is closed only once
+	progressCh := make(chan types.ProgressUpdate, 50) // Buffer progress updates to match sender
+	var doneOnce sync.Once                            // Ensure doneCh is closed only once
+	var progressOnce sync.Once                        // Ensure progressCh is closed only once
 
 	// OnDataChannel sets an event handler which is invoked when a data channel message arrives from a remote peer.
 	peerConn.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
@@ -81,9 +83,9 @@ func (r *ReceiverChannel) ClearPartialFile() error {
 	return nil
 }
 
-func (r *ReceiverChannel) processMetaData(msg []byte) (*processor.FileMetadata, error) {
+func (r *ReceiverChannel) processMetaData(msg []byte) (*types.FileMetadata, error) {
 	metadataBytes := msg[9:] // Remove "METADATA:" prefix
-	metadata, err := r.dataProcessor.DecodeMetadata(metadataBytes)
+	metadata, err := utils.DecodeJSON[types.FileMetadata](metadataBytes)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding metadata: %w", err)
 	}
@@ -93,20 +95,20 @@ func (r *ReceiverChannel) processMetaData(msg []byte) (*processor.FileMetadata, 
 
 	r.metadataReceived = true
 
-	return metadata, nil
+	return &metadata, nil
 }
 
 // MessageHandlerContext contains shared context for message handlers
 type MessageHandlerContext struct {
 	destPath     string
 	doneCh       chan struct{}
-	progressCh   chan ProgressUpdate
+	progressCh   chan types.ProgressUpdate
 	doneOnce     *sync.Once
 	progressOnce *sync.Once
 }
 
 // handleMessage dispatches messages to appropriate handlers based on type
-func (r *ReceiverChannel) handleMessage(msg webrtc.DataChannelMessage, destPath string, doneCh chan struct{}, progressCh chan ProgressUpdate, doneOnce *sync.Once, progressOnce *sync.Once) {
+func (r *ReceiverChannel) handleMessage(msg webrtc.DataChannelMessage, destPath string, doneCh chan struct{}, progressCh chan types.ProgressUpdate, doneOnce *sync.Once, progressOnce *sync.Once) {
 	ctx := &MessageHandlerContext{
 		destPath:     destPath,
 		doneCh:       doneCh,
@@ -142,9 +144,9 @@ func (r *ReceiverChannel) handleMetadataMessage(msg webrtc.DataChannelMessage, c
 
 	// Send initial progress (non-blocking)
 	select {
-	case ctx.progressCh <- ProgressUpdate{
+	case ctx.progressCh <- types.ProgressUpdate{
 		NewBytes: 0,
-		MetaData: *metadata,
+		MetaData: metadata,
 	}:
 		// Progress sent successfully
 	default:
@@ -174,11 +176,11 @@ func (r *ReceiverChannel) handleEOFMessage(_ webrtc.DataChannelMessage, ctx *Mes
 	log.Printf("File transfer complete: %d bytes received", totalBytes)
 
 	// Send final progress (non-blocking)
-	update := ProgressUpdate{
+	update := types.ProgressUpdate{
 		NewBytes: 0,
 	}
 	if r.fileMetadata != nil {
-		update.MetaData = *r.fileMetadata
+		update.MetaData = r.fileMetadata
 	}
 	select {
 	case ctx.progressCh <- update:
@@ -212,11 +214,11 @@ func (r *ReceiverChannel) handleFileDataMessage(msg webrtc.DataChannelMessage, c
 	r.bytesReceived += bytesReceived
 
 	// Send raw progress update (UI layer handles calculations and throttling)
-	update := ProgressUpdate{
+	update := types.ProgressUpdate{
 		NewBytes: bytesReceived,
 	}
 	if r.fileMetadata != nil {
-		update.MetaData = *r.fileMetadata
+		update.MetaData = r.fileMetadata
 	}
 	// Non-blocking progress send to prevent data channel blocking
 	select {

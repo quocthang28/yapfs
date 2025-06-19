@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+
+	"yapfs/pkg/types"
 )
 
 // Data channel should be init and manage data processor internally, app layer doesn't need to know about it
@@ -45,28 +47,8 @@ func (d *DataProcessor) CreateWriter(destPath string) (*os.File, error) {
 	return d.fileService.createWriter(destPath)
 }
 
-// CreateFileMetadata creates metadata and encode it (for sending) for a file (delegates to FileService)
-func (d *DataProcessor) CreateFileMetadata(filePath string) ([]byte, error) {
-	return d.fileService.createFileMetadata(filePath)
-}
-
-// CreateMetadata creates file metadata struct (not encoded) for a file (delegates to FileService)
-func (d *DataProcessor) CreateMetadata(filePath string) (*FileMetadata, error) {
-	return d.fileService.CreateMetadata(filePath)
-}
-
-// DecodeMetadata decodes JSON bytes to file metadata (delegates to FileService)
-func (d *DataProcessor) DecodeMetadata(data []byte) (*FileMetadata, error) {
-	return d.fileService.decodeMetadata(data)
-}
-
-// EncodeMetadata encodes file metadata to JSON bytes (delegates to FileService)
-func (d *DataProcessor) EncodeMetadata(metadata *FileMetadata) ([]byte, error) {
-	return d.fileService.EncodeMetadata(metadata)
-}
-
 // PrepareFileForSending opens file and validates it's ready for sending, returns metadata (delegates to ReaderService)
-func (d *DataProcessor) PrepareFileForSending(filePath string) (*FileMetadata, error) {
+func (d *DataProcessor) PrepareFileForSending(filePath string) (*types.FileMetadata, error) {
 	// Close any existing file reader
 	if d.currentReader != nil {
 		d.currentReader.close()
@@ -111,7 +93,7 @@ func (d *DataProcessor) GetCurrentFileSize() int64 {
 }
 
 // PrepareFileForReceiving opens a destination file for writing with metadata (delegates to WriterService)
-func (d *DataProcessor) PrepareFileForReceiving(destDir string, metadata *FileMetadata) (string, error) {
+func (d *DataProcessor) PrepareFileForReceiving(destDir string, metadata *types.FileMetadata) (string, error) {
 	// Close any existing file writer
 	if d.currentWriter != nil {
 		d.currentWriter.close()

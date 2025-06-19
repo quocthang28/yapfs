@@ -9,15 +9,10 @@ import (
 	"mime"
 	"os"
 	"path/filepath"
+
+	"yapfs/pkg/types"
 )
 
-// FileMetadata contains information about the file being transferred
-type FileMetadata struct {
-	Name     string `json:"name"`     // Original filename
-	Size     int64  `json:"size"`     // File size in bytes
-	MimeType string `json:"mimeType"` // MIME type of the file
-	Checksum string `json:"checksum"` // SHA-256 checksum
-}
 
 // FileService handles basic file operations
 type FileService struct{}
@@ -88,7 +83,7 @@ func (f *FileService) calculateFileChecksum(filePath string) (string, error) {
 }
 
 // CreateMetadata creates file metadata struct for a file
-func (f *FileService) CreateMetadata(filePath string) (*FileMetadata, error) {
+func (f *FileService) CreateMetadata(filePath string) (*types.FileMetadata, error) {
 	stat, err := os.Stat(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get file info: %w", err)
@@ -109,7 +104,7 @@ func (f *FileService) CreateMetadata(filePath string) (*FileMetadata, error) {
 		return nil, fmt.Errorf("failed to calculate file checksum: %w", err)
 	}
 
-	metadata := &FileMetadata{
+	metadata := &types.FileMetadata{
 		Name:     filename,
 		Size:     stat.Size(),
 		MimeType: mimeType,
@@ -135,13 +130,13 @@ func (f *FileService) createFileMetadata(filePath string) ([]byte, error) {
 }
 
 // EncodeMetadata encodes file metadata to JSON bytes
-func (f *FileService) EncodeMetadata(metadata *FileMetadata) ([]byte, error) {
+func (f *FileService) EncodeMetadata(metadata *types.FileMetadata) ([]byte, error) {
 	return json.Marshal(metadata)
 }
 
 // decodeMetadata decodes JSON bytes to file metadata
-func (f *FileService) decodeMetadata(data []byte) (*FileMetadata, error) {
-	var metadata FileMetadata
+func (f *FileService) decodeMetadata(data []byte) (*types.FileMetadata, error) {
+	var metadata types.FileMetadata
 	if err := json.Unmarshal(data, &metadata); err != nil {
 		return nil, fmt.Errorf("failed to decode metadata: %w", err)
 	}

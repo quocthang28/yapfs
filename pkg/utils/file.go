@@ -1,9 +1,14 @@
 package utils
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
+	"mime"
 	"os"
 	"path/filepath"
+	"yapfs/pkg/types"
 )
 
 // ResolveDestinationPath resolves the destination path, validating directories
@@ -44,4 +49,60 @@ func FormatFileSize(size int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(size)/float64(div), "KMGTPE"[exp])
+}
+
+// calculateFileChecksum calculates SHA-256 checksum of a file
+func CalculateFileChecksum(filePath string) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to open file for checksum: %w", err)
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", fmt.Errorf("failed to calculate checksum: %w", err)
+	}
+
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func IsFileChecksumMatched(filePath, checksum string) (bool, error) {
+	fileChecksum, err := CalculateFileChecksum(filePath)
+	if err != nil {
+		return false, fmt.Errorf("failed to calculate file checksum: %s", err)
+	}
+
+	return checksum == fileChecksum, nil
+}
+
+func CreateFileMetadata(filePath string) (types.FileMetadata, error) {
+	stat, err := os.Stat(filePath)
+	if err != nil {
+		return types.FileMetadata{}, fmt.Errorf("failed to get file info: %w", err)
+	}
+
+	// Get filename
+	filename := filepath.Base(filePath)
+
+	// Detect MIME type
+	mimeType := mime.TypeByExtension(filepath.Ext(filePath))
+	if mimeType == "" {
+		mimeType = "application/octet-stream" // Default for unknown types
+	}
+
+	// Calculate checksum
+	checksum, err := CalculateFileChecksum(filePath)
+	if err != nil {
+		return types.FileMetadata{}, fmt.Errorf("failed to calculate file checksum: %w", err)
+	}
+
+	metadata := types.FileMetadata{
+		Name:     filename,
+		Size:     stat.Size(),
+		MimeType: mimeType,
+		Checksum: checksum,
+	}
+
+	return metadata, nil
 }

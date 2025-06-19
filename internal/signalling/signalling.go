@@ -27,12 +27,6 @@ type SDPHandler interface {
 	WaitForICEGathering(ctx context.Context, peerConn *webrtc.PeerConnection) error
 }
 
-// SDPEncoder defines the interface for SDP encoding
-type SDPEncoder func(webrtc.SessionDescription) (string, error)
-
-// SDPDecoder defines the interface for SDP decoding
-type SDPDecoder func(string) (webrtc.SessionDescription, error)
-
 // SignalingService orchestrates the complete signaling flow using composition
 type SignalingService struct {
 	server SignalingServer
@@ -77,7 +71,7 @@ func (s *SignalingService) StartSenderSignallingProcess(ctx context.Context, pee
 	}
 
 	// Encode offer SDP
-	encodedOffer, err := utils.EncodeSessionDescription(*finalOffer)
+	encodedOffer, err := utils.Encode(*finalOffer)
 	if err != nil {
 		return "", fmt.Errorf("failed to encode offer SDP: %w", err)
 	}
@@ -96,7 +90,7 @@ func (s *SignalingService) StartSenderSignallingProcess(ctx context.Context, pee
 		return sessionID, fmt.Errorf("failed to wait for answer: %w", err)
 	}
 
-	answerSD, err := utils.DecodeSessionDescription(answer)
+	answerSD, err := utils.Decode[webrtc.SessionDescription](answer)
 	if err != nil {
 		return sessionID, fmt.Errorf("failed to decode answer SDP: %w", err)
 	}
@@ -118,7 +112,7 @@ func (s *SignalingService) StartReceiverSignallingProcess(ctx context.Context, p
 	}
 
 	// Decode the received offer
-	offerSD, err := utils.DecodeSessionDescription(encodedOffer)
+	offerSD, err := utils.Decode[webrtc.SessionDescription](encodedOffer)
 	if err != nil {
 		return fmt.Errorf("failed to decode offer SDP: %w", err)
 	}
@@ -148,7 +142,7 @@ func (s *SignalingService) StartReceiverSignallingProcess(ctx context.Context, p
 	}
 
 	// Encode answer SDP
-	encodedAnswer, err := utils.EncodeSessionDescription(*finalAnswer)
+	encodedAnswer, err := utils.Encode(*finalAnswer)
 	if err != nil {
 		return fmt.Errorf("failed to encode answer SDP: %w", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"yapfs/internal/config"
+	"yapfs/pkg/types"
 
 	"github.com/pion/webrtc/v4"
 )
@@ -29,11 +30,11 @@ func (d *DataChannelService) CreateFileSenderDataChannel(ctx context.Context, pe
 }
 
 // SendFile performs a blocking file transfer (call this after connection is established)
-func (d *DataChannelService) SendFile() (<-chan ProgressUpdate, error) {
+func (d *DataChannelService) SendFile() (<-chan types.ProgressUpdate, error) {
 	return d.sender.SendFile()
 }
 
 // SetupFileReceiver sets up handlers for receiving files and returns completion and progress channels
-func (d *DataChannelService) SetupFileReceiver(peerConn *webrtc.PeerConnection, destPath string) (<-chan struct{}, <-chan ProgressUpdate, error) {
+func (d *DataChannelService) SetupFileReceiver(peerConn *webrtc.PeerConnection, destPath string) (<-chan struct{}, <-chan types.ProgressUpdate, error) {
 	return d.receiver.SetupFileReceiver(peerConn, destPath)
 }

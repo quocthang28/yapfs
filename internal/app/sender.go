@@ -6,9 +6,9 @@ import (
 	"log"
 
 	"yapfs/internal/config"
+	"yapfs/internal/reporter"
 	"yapfs/internal/signalling"
 	"yapfs/internal/transport"
-	"yapfs/internal/ui"
 )
 
 // SenderOptions configures the sender application behavior
@@ -25,7 +25,6 @@ type SenderApp struct {
 	peerService        *transport.PeerService
 	dataChannelService *transport.DataChannelService
 	signalingService   *signalling.SignalingService
-	ui                 *ui.ConsoleUI
 }
 
 // NewSenderApp creates a new sender application
@@ -40,7 +39,6 @@ func NewSenderApp(
 		peerService:        peerService,
 		dataChannelService: dataChannelService,
 		signalingService:   signalingService,
-		ui:                 ui.NewConsoleUI("Sending"),
 	}
 }
 
@@ -112,9 +110,9 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 			return
 		}
 
-		// Start updating progress on UI,
-		// this blocks until transfer is complete or context is cancelled
-		s.ui.StartUpdatingSenderProgress(ctx, progressCh)
+		propressReporter := reporter.NewProgressReporter()
+		propressReporter.StartUpdatingProgress(ctx, progressCh)
+		
 		exitCh <- nil
 	}()
 

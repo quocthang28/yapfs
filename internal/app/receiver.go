@@ -8,7 +8,8 @@ import (
 	"yapfs/internal/config"
 	"yapfs/internal/signalling"
 	"yapfs/internal/transport"
-	"yapfs/internal/ui"
+	"yapfs/pkg/utils"
+	"yapfs/internal/reporter"
 )
 
 // ReceiverOptions configures the receiver application behavior
@@ -25,7 +26,6 @@ type ReceiverApp struct {
 	peerService        *transport.PeerService
 	dataChannelService *transport.DataChannelService
 	signalingService   *signalling.SignalingService
-	ui                 *ui.ConsoleUI
 }
 
 // NewReceiverApp creates a new receiver application
@@ -40,7 +40,6 @@ func NewReceiverApp(
 		peerService:        peerService,
 		dataChannelService: dataChannelService,
 		signalingService:   signalingService,
-		ui:                 ui.NewConsoleUI("Receiving"),
 	}
 }
 
@@ -51,7 +50,7 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 		return fmt.Errorf("destination path is required")
 	}
 
-	r.ui.ShowMessage(fmt.Sprintf("Preparing to receive file to: %s", opts.DestPath))
+	log.Printf("Preparing to receive file to: %s", opts.DestPath)
 
 	// Single exit channel for all termination conditions
 	exitCh := make(chan error, 1)
@@ -81,7 +80,7 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	// Single cleanup function
 	cleanup := func(code string) {
 		if err := peerConn.Close(); err != nil {
-			r.ui.ShowMessage(fmt.Sprintf("Error closing peer connection: %v", err))
+			log.Printf("Error closing peer connection: %v", err)
 		}
 
 		if code != "" {
@@ -92,7 +91,7 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	}
 
 	// Prompt the user to input code (session ID)
-	code, err := r.ui.InputCode(ctx)
+	code, err := utils.AskForCode(ctx)
 	if err != nil {
 		cleanup("")
 		return fmt.Errorf("failed to get code from user: %w", err)
@@ -113,7 +112,8 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	}
 
 	// Start updating progress on UI
-	go r.ui.StartUpdatingReceiverProgress(ctx, progressCh)
+	propressReporter := reporter.NewProgressReporter()
+	go propressReporter.StartUpdatingProgress(ctx, progressCh)
 
 	// Wait for any exit condition
 	var exitErr error
