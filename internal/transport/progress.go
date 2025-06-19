@@ -6,6 +6,6 @@ import (
 
 // ProgressUpdate represents raw file transfer progress data
 type ProgressUpdate struct {
-	BytesSent uint64
-	MetaData  processor.FileMetadata
+	NewBytes uint64 // New bytes transferred in this update
+	MetaData processor.FileMetadata
 }

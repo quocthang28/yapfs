@@ -19,15 +19,11 @@ type SenderChannel struct {
 	dataProcessor *processor.DataProcessor
 
 	// Transfer state
-	ctx        context.Context
-	filePath   string
-	totalBytes uint64
-	metadata   *processor.FileMetadata
-	bytesSent  uint64
+	ctx      context.Context
+	metadata *processor.FileMetadata
 
 	// Channels
 	bufferControlCh chan struct{}
-	progressCh      chan ProgressUpdate
 }
 
 // NewSenderChannel creates a new data channel sender
@@ -38,8 +34,8 @@ func NewSenderChannel(cfg *config.Config) *SenderChannel {
 	}
 }
 
-// CreateFileSenderDataChannel creates a data channel configured for sending files and stores it internally
-func (s *SenderChannel) CreateFileSenderDataChannel(peerConn *webrtc.PeerConnection, label string) error {
+// CreateFileSenderDataChannel creates a data channel configured for sending files and initializes everything needed for transfer
+func (s *SenderChannel) CreateFileSenderDataChannel(ctx context.Context, peerConn *webrtc.PeerConnection, label string, filePath string) error {
 	ordered := true //TODO: once data processor handle chunking this should be false
 
 	options := &webrtc.DataChannelInit{
@@ -53,39 +49,14 @@ func (s *SenderChannel) CreateFileSenderDataChannel(peerConn *webrtc.PeerConnect
 
 	s.dataChannel = dataChannel
 
-	return nil
-}
-
-// SetupFileSender configures file sending with progress reporting
-func (s *SenderChannel) SetupFileSender(ctx context.Context, filePath string) (<-chan ProgressUpdate, error) {
-	if s.dataChannel == nil {
-		return nil, fmt.Errorf("data channel not created, call CreateFileSenderDataChannel first")
-	}
-
 	// Initialize transfer state
 	s.ctx = ctx
-	s.filePath = filePath
-	s.bytesSent = 0
 	s.bufferControlCh = make(chan struct{}, 3)
-	s.progressCh = make(chan ProgressUpdate, 50)
 
-	// Prepare file for sending
-	err := s.dataProcessor.PrepareFileForSending(filePath)
+	// Prepare file for sending and get metadata
+	s.metadata, err = s.dataProcessor.PrepareFileForSending(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to prepare file for sending: %w", err)
-	}
-
-	// Get file size and create metadata once
-	s.totalBytes = uint64(s.dataProcessor.GetCurrentFileSize())
-
-	metadataBytes, err := s.dataProcessor.CreateFileMetadata(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create file metadata: %w", err)
-	}
-
-	s.metadata, err = s.dataProcessor.DecodeMetadata(metadataBytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode file metadata: %w", err)
+		return fmt.Errorf("failed to prepare file for sending: %w", err)
 	}
 
 	// OnOpen sets an event handler which is invoked when the underlying data transport has been established (or re-established).
@@ -114,47 +85,71 @@ func (s *SenderChannel) SetupFileSender(ctx context.Context, filePath string) (<
 		s.dataProcessor.Close()
 	})
 
-	return s.progressCh, nil
+	return nil
 }
 
-// SendFile performs a blocking file transfer (call this after connection is established)
-func (s *SenderChannel) SendFile() error {
-	defer close(s.progressCh)
+// SendFile performs a non-blocking file transfer, returns progress channel immediately
+func (s *SenderChannel) SendFile() (<-chan ProgressUpdate, error) {
+	progressCh := make(chan ProgressUpdate, 50)
 
-	// Wait for data channel to be ready
-	for s.dataChannel.ReadyState() != webrtc.DataChannelStateOpen {
-		select {
-		case <-s.ctx.Done():
-			return fmt.Errorf("cancelled while waiting for data channel: %v", s.ctx.Err())
-		case <-time.After(100 * time.Millisecond):
-			// Continue waiting
+	// Start file transfer in a goroutine
+	go func() {
+		defer close(progressCh)
+
+		// Wait for data channel to be ready
+		for s.dataChannel.ReadyState() != webrtc.DataChannelStateOpen {
+			select {
+			case <-s.ctx.Done():
+				log.Printf("Cancelled while waiting for data channel: %v", s.ctx.Err())
+				return
+			case <-time.After(100 * time.Millisecond):
+				// Continue waiting
+			}
 		}
-	}
 
-	log.Printf("Data channel ready, starting file transfer")
+		log.Printf("Data channel ready, starting file transfer")
 
-	// Send file metadata
-	if err := s.sendMetadataPhase(); err != nil {
-		return fmt.Errorf("error sending metadata: %v", err)
-	}
+		// Send file metadata
+		if err := s.sendMetadataPhase(progressCh); err != nil {
+			log.Printf("Error sending metadata: %v", err)
+			return
+		}
 
-	// Start file data transfer
-	return s.sendFileDataPhase()
+		// Start file data transfer
+		if err := s.sendFileDataPhase(progressCh); err != nil {
+			log.Printf("Error during file transfer: %v", err)
+			return
+		}
+	}()
+
+	return progressCh, nil
 }
 
 // sendMetadataPhase handles sending file metadata
-func (s *SenderChannel) sendMetadataPhase() error {
+func (s *SenderChannel) sendMetadataPhase(progressCh chan<- ProgressUpdate) error {
 	// Send initial progress with metadata (non-blocking)
-	s.progressCh <- ProgressUpdate{
-		BytesSent: 0,
-		MetaData:  *s.metadata,
+	progressCh <- ProgressUpdate{
+		NewBytes: 0,
+		MetaData: *s.metadata,
 	}
 
-	return s.sendFileMetaData()
+	metadataBytes, err := s.dataProcessor.EncodeMetadata(s.metadata)
+	if err != nil {
+		return fmt.Errorf("error encoding file metadata: %w", err)
+	}
+
+	// Send metadata with "METADATA:" prefix
+	metadataMsg := append([]byte("METADATA:"), metadataBytes...)
+	err = s.dataChannel.Send(metadataMsg)
+	if err != nil {
+		return fmt.Errorf("error sending metadata: %w", err)
+	}
+
+	return nil
 }
 
 // sendFileDataPhase handles the main file data transfer loop
-func (s *SenderChannel) sendFileDataPhase() error {
+func (s *SenderChannel) sendFileDataPhase(progressCh chan<- ProgressUpdate) error {
 	// Start file transfer
 	dataCh, errCh := s.dataProcessor.StartReadingFile(s.config.WebRTC.ChunkSize)
 	if dataCh == nil || errCh == nil {
@@ -171,10 +166,10 @@ func (s *SenderChannel) sendFileDataPhase() error {
 			}
 
 			if chunk.EOF {
-				return s.sendEOFPhase()
+				return s.sendEOFPhase(progressCh)
 			}
 
-			if err := s.sendDataChunk(chunk); err != nil {
+			if err := s.sendDataChunk(chunk, progressCh); err != nil {
 				return err
 			}
 
@@ -198,21 +193,20 @@ func (s *SenderChannel) sendFileDataPhase() error {
 }
 
 // sendDataChunk sends a single data chunk and updates progress
-func (s *SenderChannel) sendDataChunk(chunk processor.DataChunk) error {
+func (s *SenderChannel) sendDataChunk(chunk processor.DataChunk, progressCh chan<- ProgressUpdate) error {
 	// Send data chunk
 	err := s.dataChannel.Send(chunk.Data)
 	if err != nil {
 		return fmt.Errorf("error sending data: %v", err)
 	}
 
-	// Update progress tracking
-	s.bytesSent += uint64(len(chunk.Data))
-	s.updateProgress()
+	s.updateProgress(len(chunk.Data), progressCh)
+
 	return nil
 }
 
 // sendEOFPhase handles EOF signaling and cleanup
-func (s *SenderChannel) sendEOFPhase() error {
+func (s *SenderChannel) sendEOFPhase(progressCh chan<- ProgressUpdate) error {
 	// Send EOF marker
 	err := s.dataChannel.Send([]byte("EOF"))
 	if err != nil {
@@ -221,14 +215,14 @@ func (s *SenderChannel) sendEOFPhase() error {
 
 	log.Printf("File transfer complete")
 
-	// Send final progress (non-blocking)
+	// Send final progress with 0 new bytes (non-blocking)
 	update := ProgressUpdate{
-		BytesSent: s.bytesSent,
-		MetaData:  *s.metadata,
+		NewBytes: 0,
+		MetaData: *s.metadata,
 	}
 
 	select {
-	case s.progressCh <- update:
+	case progressCh <- update:
 		// Progress sent successfully
 	default:
 		// Progress channel full, skip this update
@@ -244,15 +238,16 @@ func (s *SenderChannel) sendEOFPhase() error {
 }
 
 // updateProgress sends raw progress data (UI layer handles calculations)
-func (s *SenderChannel) updateProgress() {
+func (s *SenderChannel) updateProgress(newbytes int, progressCh chan<- ProgressUpdate) {
 	// Send raw progress data - let UI decide when/how to display
 	update := ProgressUpdate{
-		BytesSent: s.bytesSent,
-		MetaData:  *s.metadata,
+		NewBytes: uint64(newbytes),
+		MetaData: *s.metadata,
 	}
+
 	// Non-blocking progress send to prevent data channel blocking
 	select {
-	case s.progressCh <- update:
+	case progressCh <- update:
 		// Progress sent successfully
 	default:
 		// Progress channel full, skip this update to avoid blocking data transfer
@@ -272,21 +267,5 @@ func (s *SenderChannel) handleFlowControl() error {
 			return fmt.Errorf("flow control timeout - WebRTC channel may be dead")
 		}
 	}
-	return nil
-}
-
-func (s *SenderChannel) sendFileMetaData() error {
-	metadataBytes, err := s.dataProcessor.CreateFileMetadata(s.filePath)
-	if err != nil {
-		return fmt.Errorf("error creating file metadata: %w", err)
-	}
-
-	// Send metadata with "METADATA:" prefix
-	metadataMsg := append([]byte("METADATA:"), metadataBytes...)
-	err = s.dataChannel.Send(metadataMsg)
-	if err != nil {
-		return fmt.Errorf("error sending metadata: %w", err)
-	}
-
 	return nil
 }

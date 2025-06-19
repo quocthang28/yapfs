@@ -143,8 +143,8 @@ func (r *ReceiverChannel) handleMetadataMessage(msg webrtc.DataChannelMessage, c
 	// Send initial progress (non-blocking)
 	select {
 	case ctx.progressCh <- ProgressUpdate{
-		BytesSent: 0,
-		MetaData:  *metadata,
+		NewBytes: 0,
+		MetaData: *metadata,
 	}:
 		// Progress sent successfully
 	default:
@@ -175,7 +175,7 @@ func (r *ReceiverChannel) handleEOFMessage(_ webrtc.DataChannelMessage, ctx *Mes
 
 	// Send final progress (non-blocking)
 	update := ProgressUpdate{
-		BytesSent: r.bytesReceived,
+		NewBytes: 0,
 	}
 	if r.fileMetadata != nil {
 		update.MetaData = *r.fileMetadata
@@ -208,11 +208,12 @@ func (r *ReceiverChannel) handleFileDataMessage(msg webrtc.DataChannelMessage, c
 	}
 
 	// Update progress tracking
-	r.bytesReceived += uint64(len(msg.Data))
+	bytesReceived := uint64(len(msg.Data))
+	r.bytesReceived += bytesReceived
 
 	// Send raw progress update (UI layer handles calculations and throttling)
 	update := ProgressUpdate{
-		BytesSent: r.bytesReceived,
+		NewBytes: bytesReceived,
 	}
 	if r.fileMetadata != nil {
 		update.MetaData = *r.fileMetadata

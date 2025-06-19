@@ -87,8 +87,8 @@ func (f *FileService) calculateFileChecksum(filePath string) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-// createFileMetadata creates metadata for a file and encode it to send
-func (f *FileService) createFileMetadata(filePath string) ([]byte, error) {
+// CreateMetadata creates file metadata struct for a file
+func (f *FileService) CreateMetadata(filePath string) (*FileMetadata, error) {
 	stat, err := os.Stat(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get file info: %w", err)
@@ -114,6 +114,16 @@ func (f *FileService) createFileMetadata(filePath string) ([]byte, error) {
 		Size:     stat.Size(),
 		MimeType: mimeType,
 		Checksum: checksum,
+	}
+
+	return metadata, nil
+}
+
+// createFileMetadata creates metadata for a file and encode it to send
+func (f *FileService) createFileMetadata(filePath string) ([]byte, error) {
+	metadata, err := f.CreateMetadata(filePath)
+	if err != nil {
+		return nil, err
 	}
 
 	encoded, err := f.EncodeMetadata(metadata)

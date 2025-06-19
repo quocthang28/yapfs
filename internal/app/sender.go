@@ -48,21 +48,24 @@ func NewSenderApp(
 func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	log.Printf("Preparing to send file: %s", opts.FilePath)
 
-	// Single exit channel for all termination conditions
+	// Single channel for all exit conditions
 	exitCh := make(chan error, 1)
 
 	// Create peer connection with callback functions
 	peerConn, err := s.peerService.CreatePeerConnection(ctx, "sender",
 		func(err error) {
+			// onError
 			log.Printf("Peer connection error: %v", err)
 			select {
 			case exitCh <- err:
 			default:
 			}
 		},
-		func() {},
 		func() {
-			// Connection closed - signal app exit
+			// onConnected
+		},
+		func() {
+			// onClosed
 			select {
 			case exitCh <- nil:
 			default:
@@ -73,7 +76,7 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 		return fmt.Errorf("failed to create peer connection: %w", err)
 	}
 
-	// Single cleanup function
+	// Cleanup function
 	cleanup := func(sessionID string) {
 		if err := peerConn.Close(); err != nil {
 			log.Printf("Error closing peer connection: %v", err)
@@ -86,8 +89,8 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 		}
 	}
 
-	// Create data channel for file transfer BEFORE creating the offer
-	err = s.dataChannelService.CreateFileSenderDataChannel(peerConn.PeerConnection, "fileTransfer")
+	// Create data channel for file transfer and initialize everything
+	err = s.dataChannelService.CreateFileSenderDataChannel(ctx, peerConn.PeerConnection, "fileTransfer", opts.FilePath)
 	if err != nil {
 		cleanup("")
 		return fmt.Errorf("failed to create file sender data channel: %w", err)
@@ -101,35 +104,30 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 		return fmt.Errorf("failed during signalling process: %w", err)
 	}
 
-	// Setup file sender
-	progressCh, err := s.dataChannelService.SetupFileSender(ctx, opts.FilePath)
-	if err != nil {
-		cleanup(sessionID)
-		return fmt.Errorf("failed to setup file sender: %w", err)
-	}
-
-	// Start updating progress on UI
-	go s.ui.StartUpdatingSenderProgress(progressCh)
-
-	// Create transfer completion channel
-	transferDone := make(chan error, 1)
-
 	// Start file transfer in background
 	go func() {
-		transferDone <- s.dataChannelService.SendFile()
+		progressCh, err := s.dataChannelService.SendFile()
+		if err != nil {
+			exitCh <- err
+			return
+		}
+
+		// Start updating progress on UI,
+		// this blocks until transfer is complete or context is cancelled
+		s.ui.StartUpdatingSenderProgress(ctx, progressCh)
+		exitCh <- nil
 	}()
 
 	// Wait for any exit condition
 	var exitErr error
 	select {
-	case exitErr = <-transferDone:
-		// Transfer completed (successfully or with error)
+	case exitErr = <-exitCh:
+		// Transfer completed, connection closed, or error
 	case <-ctx.Done():
 		exitErr = ctx.Err()
-	case exitErr = <-exitCh:
-		// Connection closed or error
 	}
 
 	cleanup(sessionID)
+
 	return exitErr
 }

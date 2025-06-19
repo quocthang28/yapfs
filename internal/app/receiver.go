@@ -113,7 +113,7 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	}
 
 	// Start updating progress on UI
-	go r.ui.StartUpdatingReceiverProgress(progressCh)
+	go r.ui.StartUpdatingReceiverProgress(ctx, progressCh)
 
 	// Wait for any exit condition
 	var exitErr error
