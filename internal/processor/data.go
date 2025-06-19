@@ -50,26 +50,42 @@ func (d *DataProcessor) CreateFileMetadata(filePath string) ([]byte, error) {
 	return d.fileService.createFileMetadata(filePath)
 }
 
+// CreateMetadata creates file metadata struct (not encoded) for a file (delegates to FileService)
+func (d *DataProcessor) CreateMetadata(filePath string) (*FileMetadata, error) {
+	return d.fileService.CreateMetadata(filePath)
+}
+
 // DecodeMetadata decodes JSON bytes to file metadata (delegates to FileService)
 func (d *DataProcessor) DecodeMetadata(data []byte) (*FileMetadata, error) {
 	return d.fileService.decodeMetadata(data)
 }
 
-// PrepareFileForSending opens file and validates it's ready for sending (delegates to ReaderService)
-func (d *DataProcessor) PrepareFileForSending(filePath string) error {
+// EncodeMetadata encodes file metadata to JSON bytes (delegates to FileService)
+func (d *DataProcessor) EncodeMetadata(metadata *FileMetadata) ([]byte, error) {
+	return d.fileService.EncodeMetadata(metadata)
+}
+
+// PrepareFileForSending opens file and validates it's ready for sending, returns metadata (delegates to ReaderService)
+func (d *DataProcessor) PrepareFileForSending(filePath string) (*FileMetadata, error) {
 	// Close any existing file reader
 	if d.currentReader != nil {
 		d.currentReader.close()
 	}
 
+	// Create metadata first
+	metadata, err := d.fileService.CreateMetadata(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create metadata: %w", err)
+	}
+
 	// Prepare file for reading using ReaderService
 	reader, err := d.readerService.prepareFileForReading(filePath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	d.currentReader = reader
-	return nil
+	return metadata, nil
 }
 
 // StartReadingFile reads file chunks and sends them through the data channel (delegates to ReaderService)

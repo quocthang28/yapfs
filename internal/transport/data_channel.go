@@ -23,14 +23,14 @@ func NewDataChannelService(cfg *config.Config) *DataChannelService {
 	}
 }
 
-// CreateFileSenderDataChannel creates a data channel configured for sending files
-func (d *DataChannelService) CreateFileSenderDataChannel(peerConn *webrtc.PeerConnection, label string) error {
-	return d.sender.CreateFileSenderDataChannel(peerConn, label)
+// CreateFileSenderDataChannel creates a data channel configured for sending files and initializes everything needed for transfer
+func (d *DataChannelService) CreateFileSenderDataChannel(ctx context.Context, peerConn *webrtc.PeerConnection, label string, filePath string) error {
+	return d.sender.CreateFileSenderDataChannel(ctx, peerConn, label, filePath)
 }
 
-// SetupFileSender configures file sending with progress reporting
-func (d *DataChannelService) SetupFileSender(ctx context.Context, filePath string) (<-chan struct{}, <-chan ProgressUpdate, error) {
-	return d.sender.SetupFileSender(ctx, filePath)
+// SendFile performs a blocking file transfer (call this after connection is established)
+func (d *DataChannelService) SendFile() (<-chan ProgressUpdate, error) {
+	return d.sender.SendFile()
 }
 
 // SetupFileReceiver sets up handlers for receiving files and returns completion and progress channels

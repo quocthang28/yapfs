@@ -13,11 +13,11 @@ import (
 // PeerConnection wraps webrtc.PeerConnection with state management
 type PeerConnection struct {
 	*webrtc.PeerConnection
-	role    string
-	closed  bool
-	onError func(error)
+	role        string
+	closed      bool
+	onError     func(error)
 	onConnected func()
-	onClosed func()
+	onClosed    func()
 }
 
 // PeerService manages WebRTC peer connection lifecycle with centralized state management
@@ -109,4 +109,3 @@ func (pc *PeerConnection) Close() error {
 	log.Printf("Closing peer connection (%s)", pc.role)
 	return pc.PeerConnection.Close()
 }
-

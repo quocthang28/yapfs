@@ -77,7 +77,7 @@ func (f *FirebaseClient) CreateSession(ctx context.Context, offer string) (strin
 func (f *FirebaseClient) UpdateAnswer(ctx context.Context, sessionID, answer string) error {
 	// First check if session exists
 	var sessionData Session
-	
+
 	sessionRef := f.ref.Child(sessionID)
 	if err := sessionRef.Get(f.ctx, &sessionData); err != nil {
 		return fmt.Errorf("error checking session existence for %s: %w", sessionID, err)
