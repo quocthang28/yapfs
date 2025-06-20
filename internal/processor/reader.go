@@ -78,7 +78,6 @@ func (r *readerService) startReading(reader *fileReader, chunkSize int) (<-chan 
 		for {
 			n, err := reader.bufReader.Read(buffer)
 			if err == io.EOF {
-				// Send EOF marker
 				dataCh <- DataChunk{Data: nil, EOF: true}
 				break
 			}
@@ -92,8 +91,6 @@ func (r *readerService) startReading(reader *fileReader, chunkSize int) (<-chan 
 			copy(data, buffer[:n])
 			dataCh <- DataChunk{Data: data, EOF: false}
 		}
-
-		log.Printf("File reading completed: %s", reader.filePath)
 	}()
 
 	return dataCh, errCh
@@ -102,9 +99,4 @@ func (r *readerService) startReading(reader *fileReader, chunkSize int) (<-chan 
 // close closes the internal file reader
 func (fr *fileReader) close() error {
 	return fr.file.Close()
-}
-
-// getFileSize returns the file size for progress calculation
-func (fr *fileReader) getFileSize() int64 {
-	return fr.fileInfo.Size()
 }

@@ -37,16 +37,6 @@ func NewDataProcessor() *DataProcessor {
 	}
 }
 
-// OpenReader opens a file for reading (delegates to FileService)
-func (d *DataProcessor) OpenReader(filePath string) (*os.File, error) {
-	return d.fileService.openReader(filePath)
-}
-
-// CreateWriter creates a file for writing (delegates to FileService)
-func (d *DataProcessor) CreateWriter(destPath string) (*os.File, error) {
-	return d.fileService.createWriter(destPath)
-}
-
 // PrepareFileForSending opens file and validates it's ready for sending, returns metadata (delegates to ReaderService)
 func (d *DataProcessor) PrepareFileForSending(filePath string) (*types.FileMetadata, error) {
 	// Close any existing file reader
@@ -82,14 +72,6 @@ func (d *DataProcessor) StartReadingFile(chunkSize int) (<-chan DataChunk, <-cha
 	d.currentReader = nil
 
 	return dataCh, errCh
-}
-
-// GetCurrentFileSize returns the size of the currently prepared file for reading
-func (d *DataProcessor) GetCurrentFileSize() int64 {
-	if d.currentReader == nil {
-		return 0
-	}
-	return d.currentReader.getFileSize()
 }
 
 // PrepareFileForReceiving opens a destination file for writing with metadata (delegates to WriterService)

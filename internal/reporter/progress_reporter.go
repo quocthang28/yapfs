@@ -46,14 +46,6 @@ func (pr *ProgressReporter) StartUpdatingProgress(ctx context.Context, progressC
 				return
 			}
 
-			// First progress update contains metadata
-			if progress.MetaData != nil && metadata == nil {
-				metadata = progress.MetaData
-				totalSize = metadata.Size
-				log.Printf("Starting transfer: %s (%d bytes)\n", metadata.Name, totalSize)
-				continue
-			}
-
 			// Update transferred bytes
 			transferredBytes += progress.NewBytes
 

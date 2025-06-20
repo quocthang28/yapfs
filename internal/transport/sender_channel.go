@@ -16,16 +16,13 @@ import (
 
 // SenderChannel manages data channel operations for sending files
 type SenderChannel struct {
-	ctx           context.Context
-	config        *config.Config
-	dataChannel   *webrtc.DataChannel
-	dataProcessor *processor.DataProcessor
-
-	metadata *types.FileMetadata
-
-	// Channels
-	bufferControlCh chan struct{} // Signals when WebRTC buffer is ready for more data (flow control)
-	readyCh         chan struct{} // Signals when data channel is open and ready for file transfer
+	ctx             context.Context
+	config          *config.Config
+	dataChannel     *webrtc.DataChannel
+	dataProcessor   *processor.DataProcessor
+	metadata        *types.FileMetadata // TODO: remove this
+	bufferControlCh chan struct{}       // Signals when WebRTC buffer is ready for more data (flow control)
+	readyCh         chan struct{}       // Signals when data channel is open and ready for file transfer
 }
 
 // NewSenderChannel creates a new data channel sender
@@ -33,7 +30,7 @@ func NewSenderChannel(cfg *config.Config) *SenderChannel {
 	return &SenderChannel{
 		config:          cfg,
 		dataProcessor:   processor.NewDataProcessor(),
-		bufferControlCh: make(chan struct{}, 3),
+		bufferControlCh: make(chan struct{}),
 		readyCh:         make(chan struct{}),
 	}
 }
@@ -42,7 +39,7 @@ func NewSenderChannel(cfg *config.Config) *SenderChannel {
 func (s *SenderChannel) CreateFileSenderDataChannel(ctx context.Context, peerConn *webrtc.PeerConnection, label string, filePath string) error {
 	s.ctx = ctx
 
-	ordered := true //TODO: once data processor handle chunking this should be false
+	ordered := true
 
 	options := &webrtc.DataChannelInit{
 		Ordered: &ordered,
@@ -73,7 +70,6 @@ func (s *SenderChannel) CreateFileSenderDataChannel(ctx context.Context, peerCon
 		select {
 		case s.bufferControlCh <- struct{}{}:
 		default:
-			log.Printf("Flow control: signal already pending, skipping")
 		}
 	})
 
@@ -164,7 +160,7 @@ func (s *SenderChannel) sendFileDataPhase(progressCh chan<- types.ProgressUpdate
 			}
 
 			if chunk.EOF {
-				return s.sendEOFPhase(progressCh)
+				return s.sendEOF()
 			}
 
 			if err := s.sendDataChunk(chunk, progressCh); err != nil {
@@ -198,30 +194,27 @@ func (s *SenderChannel) sendDataChunk(chunk processor.DataChunk, progressCh chan
 		return fmt.Errorf("error sending data: %v", err)
 	}
 
-	s.updateProgress(len(chunk.Data), progressCh)
-
-	return nil
-}
-
-// sendEOFPhase handles EOF signaling and cleanup
-func (s *SenderChannel) sendEOFPhase(progressCh chan<- types.ProgressUpdate) error {
-	// Send EOF marker
-	err := s.dataChannel.Send([]byte("EOF"))
-	if err != nil {
-		return fmt.Errorf("error sending EOF: %v", err)
-	}
-
-	// Send final progress with 0 new bytes (non-blocking)
+	// Send progress update
 	update := types.ProgressUpdate{
-		NewBytes: 0,
-		MetaData: s.metadata,
+		NewBytes: uint64(len(chunk.Data)),
 	}
 
 	select {
 	case progressCh <- update:
 		// Progress sent successfully
 	default:
-		// Progress channel full, skip this update
+		// Progress channel full, skip this update to avoid blocking data transfer
+	}
+	
+	return nil
+}
+
+// sendEOF handles EOF signaling and cleanup
+func (s *SenderChannel) sendEOF() error {
+	// Send EOF marker
+	err := s.dataChannel.Send([]byte("EOF"))
+	if err != nil {
+		return fmt.Errorf("error sending EOF: %v", err)
 	}
 
 	// Close the channel after sending EOF
@@ -233,23 +226,6 @@ func (s *SenderChannel) sendEOFPhase(progressCh chan<- types.ProgressUpdate) err
 	return nil
 }
 
-// updateProgress sends raw progress data (UI layer handles calculations)
-func (s *SenderChannel) updateProgress(newbytes int, progressCh chan<- types.ProgressUpdate) {
-	// Send raw progress data - let UI decide when/how to display
-	update := types.ProgressUpdate{
-		NewBytes: uint64(newbytes),
-		MetaData: s.metadata,
-	}
-
-	// Non-blocking progress send to prevent data channel blocking
-	select {
-	case progressCh <- update:
-		// Progress sent successfully
-	default:
-		// Progress channel full, skip this update to avoid blocking data transfer
-	}
-}
-
 // handleFlowControl manages flow control and backpressure
 func (s *SenderChannel) handleFlowControl() error {
 	// Flow control: wait if buffer is too full
@@ -257,7 +233,7 @@ func (s *SenderChannel) handleFlowControl() error {
 		select {
 		case <-s.bufferControlCh:
 			return nil
-		case <-s.ctx.Done():
+		case <-s.ctx.Done(): 
 			return fmt.Errorf("file transfer cancelled: %v", s.ctx.Err())
 		case <-time.After(30 * time.Second):
 			return fmt.Errorf("flow control timeout - WebRTC channel may be dead")

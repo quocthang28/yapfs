@@ -3,7 +3,6 @@ package processor
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
@@ -12,7 +11,6 @@ import (
 
 	"yapfs/pkg/types"
 )
-
 
 // FileService handles basic file operations
 type FileService struct{}
@@ -112,33 +110,4 @@ func (f *FileService) CreateMetadata(filePath string) (*types.FileMetadata, erro
 	}
 
 	return metadata, nil
-}
-
-// createFileMetadata creates metadata for a file and encode it to send
-func (f *FileService) createFileMetadata(filePath string) ([]byte, error) {
-	metadata, err := f.CreateMetadata(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	encoded, err := f.EncodeMetadata(metadata)
-	if err != nil {
-		return nil, err
-	}
-
-	return encoded, nil
-}
-
-// EncodeMetadata encodes file metadata to JSON bytes
-func (f *FileService) EncodeMetadata(metadata *types.FileMetadata) ([]byte, error) {
-	return json.Marshal(metadata)
-}
-
-// decodeMetadata decodes JSON bytes to file metadata
-func (f *FileService) decodeMetadata(data []byte) (*types.FileMetadata, error) {
-	var metadata types.FileMetadata
-	if err := json.Unmarshal(data, &metadata); err != nil {
-		return nil, fmt.Errorf("failed to decode metadata: %w", err)
-	}
-	return &metadata, nil
 }
