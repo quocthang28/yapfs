@@ -20,7 +20,7 @@ type SenderChannel struct {
 	config          *config.Config
 	dataChannel     *webrtc.DataChannel
 	dataProcessor   *processor.DataProcessor
-	metadata        *types.FileMetadata // TODO: remove this
+	fileMetadata    *types.FileMetadata // File metadata for current transfer
 	bufferControlCh chan struct{}       // Signals when WebRTC buffer is ready for more data (flow control)
 	readyCh         chan struct{}       // Signals when data channel is open and ready for file transfer
 }
@@ -52,8 +52,8 @@ func (s *SenderChannel) CreateFileSenderDataChannel(ctx context.Context, peerCon
 
 	s.dataChannel = dataChannel
 
-	// Prepare file for sending and get metadata
-	s.metadata, err = s.dataProcessor.PrepareFileForSending(filePath)
+	// Prepare file for sending and store metadata
+	s.fileMetadata, err = s.dataProcessor.PrepareFileForSending(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to prepare file for sending: %w", err)
 	}
@@ -121,13 +121,17 @@ func (s *SenderChannel) SendFile() (<-chan types.ProgressUpdate, error) {
 
 // sendMetadataPhase handles sending file metadata
 func (s *SenderChannel) sendMetadataPhase(progressCh chan<- types.ProgressUpdate) error {
+	if s.fileMetadata == nil {
+		return fmt.Errorf("no file metadata available")
+	}
+
 	// Send initial progress with metadata (non-blocking)
 	progressCh <- types.ProgressUpdate{
 		NewBytes: 0,
-		MetaData: s.metadata,
+		MetaData: s.fileMetadata,
 	}
 
-	metadataBytes, err := utils.EncodeJSON(s.metadata)
+	metadataBytes, err := utils.EncodeJSON(s.fileMetadata)
 	if err != nil {
 		return fmt.Errorf("error encoding file metadata: %w", err)
 	}

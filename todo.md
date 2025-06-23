@@ -68,3 +68,38 @@
   - Timeout prevents hanging on network issues
   - Maintains data integrity for file transfers
   - Minimal overhead (single ACK message)
+
+
+WebRTC handles connection reestablishment through several mechanisms designed to maintain connectivity when network conditions change:
+ICE Restart
+The primary mechanism is ICE restart, which allows peers to renegotiate the connection without starting completely over. When a connection fails or degrades:
+
+Either peer can trigger an ICE restart by calling restartIce() on the RTCPeerConnection
+This generates new ICE credentials and begins gathering fresh candidate pairs
+The peers exchange new offer/answer with updated ICE parameters
+Existing media streams continue during the restart process
+
+Connection State Monitoring
+WebRTC provides several connection state indicators:
+
+ICE Connection State: Tracks the ICE agent's connectivity (new, checking, connected, completed, failed, disconnected, closed)
+Connection State: Higher-level state combining ICE and DTLS status
+Gathering State: Shows ICE candidate collection progress
+
+Applications monitor these states and trigger reconnection when they detect failed or disconnected states.
+STUN/TURN Keepalives
+WebRTC maintains connections through:
+
+STUN binding requests sent periodically to keep NAT mappings alive
+TURN channel bindings refreshed to maintain relay connections
+Configurable keepalive intervals (typically 15-30 seconds)
+
+Automatic Recovery
+Modern WebRTC implementations include automatic recovery features:
+
+Continuous gathering: Some browsers continue collecting ICE candidates even after connection establishment
+Candidate pair monitoring: Failed pairs are detected and replaced with working alternatives
+DTLS retransmission: Handles packet loss during the handshake phase
+
+The key advantage is that media can often continue flowing on working candidate pairs while the connection reestablishes failed paths in the background, providing a more seamless user experience than completely restarting the connection.
+

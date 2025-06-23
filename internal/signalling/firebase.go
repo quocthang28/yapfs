@@ -97,18 +97,6 @@ func (f *FirebaseClient) UpdateAnswer(ctx context.Context, sessionID, answer str
 }
 
 func (f *FirebaseClient) WaitForAnswer(ctx context.Context, sessionID string) (string, error) {
-	// First verify the session exists
-	var initialCheck Session
-
-	sessionRef := f.ref.Child(sessionID)
-	if err := sessionRef.Get(f.ctx, &initialCheck); err != nil {
-		return "", fmt.Errorf("error checking session existence for %s: %w", sessionID, err)
-	}
-
-	if initialCheck.ID == "" {
-		return "", fmt.Errorf("session %s not found", sessionID)
-	}
-
 	time.Sleep(time.Second * 5)
 	log.Printf("Waiting for receiver to answer...")
 
@@ -116,7 +104,7 @@ func (f *FirebaseClient) WaitForAnswer(ctx context.Context, sessionID string) (s
 		var sessionData struct {
 			Answer string `json:"answer"`
 		}
-		if err := sessionRef.Get(f.ctx, &sessionData); err != nil {
+		if err := f.ref.Child(sessionID).Get(f.ctx, &sessionData); err != nil {
 			log.Println(err.Error())
 			continue
 		}

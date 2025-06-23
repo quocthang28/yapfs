@@ -31,6 +31,11 @@ func (pr *ProgressReporter) StartUpdatingProgress(ctx context.Context, progressC
 			log.Println("Progress reporting stopped: user cancelled")
 			return
 		case progress, ok := <-progressCh:
+			if progress.MetaData != nil {
+				metadata = progress.MetaData
+				totalSize = metadata.Size
+			}
+
 			if !ok {
 				// Channel closed - transfer complete
 				if metadata != nil {
