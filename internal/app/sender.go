@@ -112,15 +112,19 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 
 		propressReporter := reporter.NewProgressReporter()
 		propressReporter.StartUpdatingProgress(ctx, progressCh)
-		
+
 		exitCh <- nil
 	}()
 
 	// Wait for any exit condition
 	var exitErr error
+
 	select {
 	case exitErr = <-exitCh:
 		// Transfer completed, connection closed, or error
+		if exitErr == nil {
+			log.Println("File transfer completed successfully")
+		}
 	case <-ctx.Done():
 		exitErr = ctx.Err()
 	}

@@ -34,7 +34,12 @@ func (d *DataChannelService) SendFile() (<-chan types.ProgressUpdate, error) {
 	return d.sender.SendFile()
 }
 
-// SetupFileReceiver sets up handlers for receiving files and returns completion and progress channels
-func (d *DataChannelService) SetupFileReceiver(peerConn *webrtc.PeerConnection, destPath string) (<-chan struct{}, <-chan types.ProgressUpdate, error) {
-	return d.receiver.SetupFileReceiver(peerConn, destPath)
+// CreateFileReceiverDataChannel sets up data channel for receiving files
+func (d *DataChannelService) CreateFileReceiverDataChannel(ctx context.Context, peerConn *webrtc.PeerConnection) error {
+	return d.receiver.CreateFileReceiverDataChannel(ctx, peerConn)
+}
+
+// ReceiveFile performs a non-blocking file receive, returns progress channel immediately
+func (d *DataChannelService) ReceiveFile(destPath string) (<-chan types.ProgressUpdate, error) {
+	return d.receiver.ReceiveFile(destPath)
 }

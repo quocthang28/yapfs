@@ -61,7 +61,7 @@ func (s *SenderChannel) CreateFileSenderDataChannel(ctx context.Context, peerCon
 	// OnOpen sets an event handler which is invoked when the underlying data transport has been established (or re-established).
 	s.dataChannel.OnOpen(func() {
 		log.Printf("File data channel opened: %s-%d", s.dataChannel.Label(), s.dataChannel.ID())
-		close(s.readyCh)
+		close(s.readyCh) // Signal to SendFile() that it is ready to transfer
 	})
 
 	// Set up flow control

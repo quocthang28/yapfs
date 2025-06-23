@@ -6,10 +6,10 @@ import (
 	"log"
 
 	"yapfs/internal/config"
+	"yapfs/internal/reporter"
 	"yapfs/internal/signalling"
 	"yapfs/internal/transport"
 	"yapfs/pkg/utils"
-	"yapfs/internal/reporter"
 )
 
 // ReceiverOptions configures the receiver application behavior
@@ -104,28 +104,39 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 		return fmt.Errorf("failed during signalling process: %w", err)
 	}
 
-	// Setup file receiver with progress tracking
-	doneCh, progressCh, err := r.dataChannelService.SetupFileReceiver(peerConn.PeerConnection, opts.DestPath)
+	// Setup file receiver data channel
+	err = r.dataChannelService.CreateFileReceiverDataChannel(ctx, peerConn.PeerConnection)
 	if err != nil {
 		cleanup(code)
 		return fmt.Errorf("failed to setup file receiver data channel handler: %w", err)
 	}
 
-	// Start updating progress on UI
-	propressReporter := reporter.NewProgressReporter()
-	go propressReporter.StartUpdatingProgress(ctx, progressCh)
+	// Start file receive with progress tracking in background
+	go func() {
+		progressCh, err := r.dataChannelService.ReceiveFile(opts.DestPath)
+		if err != nil {
+			exitCh <- err
+			return
+		}
+
+		propressReporter := reporter.NewProgressReporter()
+		propressReporter.StartUpdatingProgress(ctx, progressCh)
+
+		exitCh <- nil
+	}()
 
 	// Wait for any exit condition
 	var exitErr error
 
 	select {
-	case <-doneCh:
-		// Transfer completed successfully
+	case exitErr = <-exitCh:
+		// File receive completed or error
+		if exitErr == nil {
+			log.Println("File transfer completed successfully")
+		}
 	case <-ctx.Done():
 		// Context cancelled
 		exitErr = ctx.Err()
-	case exitErr = <-exitCh:
-		// Connection closed or error
 	}
 
 	cleanup(code)
