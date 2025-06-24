@@ -10,7 +10,7 @@ import (
 type MessageHandler interface {
 	// Message processing
 	HandleMessage(msg Message, progressCh chan<- types.ProgressUpdate) error
-	
+
 	// Lifecycle events
 	OnChannelReady() error
 	OnChannelClosed()

@@ -22,20 +22,20 @@ type Channel struct {
 	dataChannel   *webrtc.DataChannel
 	dataProcessor *processor.DataProcessor
 	handler       MessageHandler
-	
+
 	// Channel management
 	readyCh         chan struct{}
 	bufferControlCh chan struct{}
-	
+
 	// Message routing
 	incomingMsgCh chan webrtc.DataChannelMessage
 	outgoingMsgCh chan []byte
-	
+
 	// State management
 	isReady    bool
 	isClosed   bool
 	closeMutex sync.RWMutex
-	
+
 	// Graceful shutdown
 	shutdownOnce sync.Once
 }
@@ -70,7 +70,7 @@ func (c *Channel) CreateDataChannel(peerConn *webrtc.PeerConnection, label strin
 
 	c.dataChannel = dataChannel
 	c.setupDataChannelHandlers()
-	
+
 	return nil
 }
 
@@ -81,7 +81,7 @@ func (c *Channel) SetupReceiverDataChannel(peerConn *webrtc.PeerConnection) erro
 		log.Printf("Received data channel: %s-%d", dataChannel.Label(), dataChannel.ID())
 		c.setupDataChannelHandlers()
 	})
-	
+
 	return nil
 }
 
@@ -137,7 +137,7 @@ func (c *Channel) StartMessageLoop() <-chan types.ProgressUpdate {
 
 		// Start message processing loops first
 		var wg sync.WaitGroup
-		
+
 		// Incoming message processing
 		wg.Add(1)
 		go func() {
@@ -195,7 +195,6 @@ func (c *Channel) SendMessage(msgType MessageType, payload []byte) error {
 		return fmt.Errorf("channel context cancelled")
 	}
 }
-
 
 // processIncomingMessages handles incoming WebRTC messages
 func (c *Channel) processIncomingMessages(progressCh chan<- types.ProgressUpdate) {
@@ -308,7 +307,7 @@ func (c *Channel) handleClose() {
 	}
 	c.isClosed = true
 	c.closeMutex.Unlock()
-	
+
 	c.handler.OnChannelClosed()
 	c.shutdown()
 }
@@ -322,7 +321,7 @@ func (c *Channel) handleError(err error) {
 	}
 	c.isClosed = true
 	c.closeMutex.Unlock()
-	
+
 	c.handler.OnChannelError(err)
 	c.shutdown()
 }

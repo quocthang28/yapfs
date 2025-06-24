@@ -37,7 +37,7 @@ type fileReader struct {
 
 // prepareFileForReading opens file and validates it's ready for reading
 func (r *readerService) prepareFileForReading(filePath string) (*fileReader, error) {
-	
+
 	// Open file for reading
 	file, err := r.fileService.openReader(filePath)
 	if err != nil {
@@ -90,7 +90,7 @@ func (r *readerService) startReading(reader *fileReader, chunkSize int) (<-chan 
 			// Send data chunk
 			data := make([]byte, n)
 			copy(data, buffer[:n])
-			
+
 			dataCh <- DataChunk{Data: data, EOF: false}
 		}
 	}()

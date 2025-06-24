@@ -10,6 +10,6 @@ type FileMetadata struct {
 
 // ProgressUpdate represents raw file transfer progress data
 type ProgressUpdate struct {
-	NewBytes uint64       // New bytes transferred in this update
+	NewBytes uint64        // New bytes transferred in this update
 	MetaData *FileMetadata // This should only be sent once at the start
 }

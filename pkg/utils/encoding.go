@@ -12,7 +12,7 @@ func Encode[T any](value T) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal value: %w", err)
 	}
-	
+
 	return base64.StdEncoding.EncodeToString(bytes), nil
 }
 

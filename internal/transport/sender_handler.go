@@ -39,7 +39,7 @@ type SenderHandler struct {
 	// Transfer control
 	transferActive bool
 	transferMutex  sync.RWMutex
-	
+
 	// Completion callback
 	onCompleted func(error)
 }
@@ -69,6 +69,9 @@ func NewSenderHandler(ctx context.Context, cfg *config.Config, filePath string, 
 		return nil, fmt.Errorf("failed to prepare file for sending: %w", err)
 	}
 	handler.fileMetadata = metadata
+
+	// Start context monitoring for cancellation
+	go handler.monitorContext()
 
 	return handler, nil
 }
@@ -109,13 +112,13 @@ func (s *SenderHandler) OnChannelReady() error {
 // OnChannelClosed handles channel close events
 func (s *SenderHandler) OnChannelClosed() {
 	log.Printf("Sender channel closed")
-	
+
 	// Only transition to completed if we're not already in a terminal state
 	currentState := s.getState()
 	if currentState != SenderCompleted && currentState != SenderError {
 		s.setState(SenderCompleted)
 	}
-	
+
 	// Notify app layer of completion
 	if s.onCompleted != nil {
 		var err error
@@ -124,25 +127,28 @@ func (s *SenderHandler) OnChannelClosed() {
 		}
 		s.onCompleted(err)
 	}
-	
+
 	s.BaseHandler.OnChannelClosed()
 }
 
 // OnChannelError handles channel error events
 func (s *SenderHandler) OnChannelError(err error) {
 	log.Printf("Sender channel error: %v", err)
-	
+
 	// Only transition to error if we're not already in a terminal state
 	currentState := s.getState()
 	if currentState != SenderCompleted && currentState != SenderError {
 		s.setState(SenderError)
 	}
-	
+
+	// Clean up resources on error
+	s.cleanup()
+
 	// Notify app layer of error
 	if s.onCompleted != nil {
 		s.onCompleted(err)
 	}
-	
+
 	s.BaseHandler.OnChannelError(err)
 }
 
@@ -380,12 +386,28 @@ func (s *SenderHandler) setState(state SenderState) {
 	}
 }
 
-// GetFileMetadata returns the file metadata
-func (s *SenderHandler) GetFileMetadata() *types.FileMetadata {
-	return s.fileMetadata
+// cleanup handles resource cleanup for sender
+func (s *SenderHandler) cleanup() {
+	// Stop any ongoing file transfer
+	s.stopFileTransfer()
+	
+	// Close the data processor (closes file reader)
+	if s.dataProcessor != nil {
+		if err := s.dataProcessor.Close(); err != nil {
+			log.Printf("Warning: failed to close data processor: %v", err)
+		}
+	}
 }
 
-// GetCurrentState returns the current transfer state
-func (s *SenderHandler) GetCurrentState() SenderState {
-	return s.getState()
+// monitorContext monitors the context for cancellation and handles cleanup
+func (s *SenderHandler) monitorContext() {
+	<-s.Context().Done()
+	
+	// Context was cancelled (e.g., Ctrl+C)
+	log.Printf("Sender context cancelled, cleaning up...")
+	
+	// Close the channel if it exists
+	if s.channel != nil {
+		s.channel.Close()
+	}
 }

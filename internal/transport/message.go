@@ -10,15 +10,15 @@ type MessageType string
 
 const (
 	// Control messages
-	MSG_READY            MessageType = "READY"
-	MSG_METADATA_ACK     MessageType = "METADATA_ACK"
+	MSG_READY             MessageType = "READY"
+	MSG_METADATA_ACK      MessageType = "METADATA_ACK"
 	MSG_TRANSFER_COMPLETE MessageType = "TRANSFER_COMPLETE"
-	MSG_ERROR            MessageType = "ERROR"
-	
-	// Data messages  
-	MSG_METADATA         MessageType = "METADATA"
-	MSG_FILE_DATA        MessageType = "FILE_DATA"
-	MSG_EOF              MessageType = "EOF"
+	MSG_ERROR             MessageType = "ERROR"
+
+	// Data messages
+	MSG_METADATA  MessageType = "METADATA"
+	MSG_FILE_DATA MessageType = "FILE_DATA"
+	MSG_EOF       MessageType = "EOF"
 )
 
 // Message represents a structured message sent over the data channel
@@ -82,4 +82,3 @@ func CreateDataMessage(msgType MessageType, payload []byte) Message {
 		Payload: payload,
 	}
 }
-

@@ -31,10 +31,6 @@ type ReceiverHandler struct {
 	// Channel communication
 	channel *Channel
 
-	// Transfer tracking
-	bytesReceived uint64
-	transferMutex sync.RWMutex
-	
 	// Completion callback
 	onCompleted func(error)
 }
@@ -43,16 +39,20 @@ type ReceiverHandler struct {
 func NewReceiverHandler(ctx context.Context, cfg *config.Config, destPath string, onCompleted func(error)) *ReceiverHandler {
 	baseHandler := NewBaseHandler(ctx)
 
-	return &ReceiverHandler{
+	handler := &ReceiverHandler{
 		BaseHandler:      baseHandler,
 		config:           cfg,
 		dataProcessor:    processor.NewDataProcessor(),
 		DestPath:         destPath,
 		transferState:    ReceiverInitializing,
 		metadataReceived: false,
-		bytesReceived:    0,
 		onCompleted:      onCompleted,
 	}
+
+	// Start context monitoring for cancellation
+	go handler.monitorContext()
+
+	return handler
 }
 
 // SetChannel sets the channel reference (called by Channel after creation)
@@ -88,7 +88,7 @@ func (r *ReceiverHandler) OnChannelReady() error {
 		log.Printf("Failed to send READY message: %v", err)
 		return err
 	}
-	
+
 	log.Printf("READY message sent successfully")
 	return nil
 }
@@ -96,13 +96,18 @@ func (r *ReceiverHandler) OnChannelReady() error {
 // OnChannelClosed handles channel close events
 func (r *ReceiverHandler) OnChannelClosed() {
 	log.Printf("Receiver channel closed")
-	
+
 	// Only transition to completed if we're not already in a terminal state
 	currentState := r.getState()
 	if currentState != ReceiverCompleted && currentState != ReceiverError {
 		r.setState(ReceiverCompleted)
 	}
-	
+
+	// Clean up partial file if transfer was interrupted
+	if currentState != ReceiverCompleted {
+		r.cleanupPartialFile()
+	}
+
 	// Notify app layer of completion
 	if r.onCompleted != nil {
 		var err error
@@ -111,25 +116,28 @@ func (r *ReceiverHandler) OnChannelClosed() {
 		}
 		r.onCompleted(err)
 	}
-	
+
 	r.BaseHandler.OnChannelClosed()
 }
 
 // OnChannelError handles channel error events
 func (r *ReceiverHandler) OnChannelError(err error) {
 	log.Printf("Receiver channel error: %v", err)
-	
+
 	// Only transition to error if we're not already in a terminal state
 	currentState := r.getState()
 	if currentState != ReceiverCompleted && currentState != ReceiverError {
 		r.setState(ReceiverError)
 	}
-	
+
+	// Clean up partial file on error
+	r.cleanupPartialFile()
+
 	// Notify app layer of error
 	if r.onCompleted != nil {
 		r.onCompleted(err)
 	}
-	
+
 	r.BaseHandler.OnChannelError(err)
 }
 
@@ -195,12 +203,6 @@ func (r *ReceiverHandler) handleFileDataMessage(msg Message, progressCh chan<- t
 		return r.sendErrorAndFail(fmt.Sprintf("failed to write data: %v", err))
 	}
 
-	// Update bytes received counter
-	r.transferMutex.Lock()
-	r.bytesReceived += uint64(len(msg.Payload))
-	currentBytes := r.bytesReceived
-	r.transferMutex.Unlock()
-
 	// Send progress update
 	update := types.ProgressUpdate{
 		NewBytes: uint64(len(msg.Payload)),
@@ -210,14 +212,6 @@ func (r *ReceiverHandler) handleFileDataMessage(msg Message, progressCh chan<- t
 	case progressCh <- update:
 	default:
 		// Progress channel full, skip this update to avoid blocking
-	}
-
-	// Optional: Log progress for large files
-	if r.fileMetadata != nil && r.fileMetadata.Size > 0 {
-		progress := float64(currentBytes) / float64(r.fileMetadata.Size) * 100
-		if currentBytes%1048576 == 0 { // Log every MB
-			log.Printf("Received %.1f%% (%d/%d bytes)", progress, currentBytes, r.fileMetadata.Size)
-		}
 	}
 
 	return nil
@@ -304,24 +298,27 @@ func (r *ReceiverHandler) setState(state ReceiverState) {
 	}
 }
 
-// GetFileMetadata returns the received file metadata
-func (r *ReceiverHandler) GetFileMetadata() *types.FileMetadata {
-	return r.fileMetadata
+// cleanupPartialFile removes any partial file that was being written
+func (r *ReceiverHandler) cleanupPartialFile() {
+	if r.dataProcessor != nil {
+		if err := r.dataProcessor.ClearPartialFile(); err != nil {
+			log.Printf("Warning: failed to clean up partial file: %v", err)
+		}
+	}
 }
 
-// GetCurrentState returns the current transfer state
-func (r *ReceiverHandler) GetCurrentState() ReceiverState {
-	return r.getState()
-}
+// monitorContext monitors the context for cancellation and handles cleanup
+func (r *ReceiverHandler) monitorContext() {
+	<-r.Context().Done()
 
-// GetBytesReceived returns the number of bytes received so far
-func (r *ReceiverHandler) GetBytesReceived() uint64 {
-	r.transferMutex.RLock()
-	defer r.transferMutex.RUnlock()
-	return r.bytesReceived
-}
+	// Context was cancelled (e.g., Ctrl+C)
+	log.Printf("Receiver context cancelled, cleaning up...")
 
-// IsMetadataReceived returns whether metadata has been received
-func (r *ReceiverHandler) IsMetadataReceived() bool {
-	return r.metadataReceived
+	// Clean up partial file
+	r.cleanupPartialFile()
+
+	// Close the channel if it exists
+	if r.channel != nil {
+		r.channel.Close()
+	}
 }

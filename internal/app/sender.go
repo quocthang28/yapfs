@@ -81,7 +81,7 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	}
 
 	// Create data channel for file transfer with completion callback
-	senderChannel, err := transport.CreateSenderChannel(ctx, s.config, peerConn.PeerConnection, "fileTransfer", opts.FilePath, 
+	senderChannel, err := transport.CreateSenderChannel(ctx, s.config, peerConn.PeerConnection, "fileTransfer", opts.FilePath,
 		func(err error) {
 			// Channel completed or failed - signal app to exit
 			select {
