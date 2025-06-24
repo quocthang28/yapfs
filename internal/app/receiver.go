@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 
 	"yapfs/internal/config"
 	"yapfs/internal/reporter"
@@ -112,11 +113,15 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	}
 
 	// Start file receive with progress tracking in background
+	progressCtx, cancelProgress := context.WithCancel(ctx)
+	var progressWg sync.WaitGroup
+	progressWg.Add(1)
 	go func() {
+		defer progressWg.Done()
 		progressCh := receiverChannel.StartMessageLoop()
 
 		propressReporter := reporter.NewProgressReporter()
-		propressReporter.StartUpdatingProgress(ctx, progressCh)
+		propressReporter.StartUpdatingProgress(progressCtx, progressCh)
 	}()
 
 	// Wait for any exit condition
@@ -134,6 +139,10 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	}
 
 	cleanup(code)
+
+	// Cancel progress reporting and wait for it to complete
+	cancelProgress()
+	progressWg.Wait()
 
 	return exitErr
 }

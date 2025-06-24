@@ -212,7 +212,7 @@ func (s *SenderHandler) handleTransferComplete(msg Message) error {
 	if s.channel != nil {
 		go func() {
 			// Small delay to ensure any final messages are processed
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(200 * time.Millisecond)
 			s.channel.Close()
 		}()
 	}
@@ -341,22 +341,11 @@ func (s *SenderHandler) sendEOF() error {
 
 // sendErrorToReceiver sends an error message to the receiver
 func (s *SenderHandler) sendErrorToReceiver(errorMsg string) {
-	msg := Message{
-		Type:  MSG_ERROR,
-		Error: errorMsg,
-	}
-	data, err := SerializeMessage(msg)
+	err := s.channel.SendErrorMessage(errorMsg)
 	if err != nil {
-		log.Printf("Failed to serialize error message: %v", err)
-		return
-	}
-
-	// Try to send error message (don't block if channel is full)
-	select {
-	case s.channel.outgoingMsgCh <- data:
+		log.Printf("Could not send error to receiver: %v", err)
+	} else {
 		log.Printf("Sent error to receiver: %s", errorMsg)
-	default:
-		log.Printf("Could not send error to receiver (channel full): %s", errorMsg)
 	}
 }
 
@@ -405,9 +394,6 @@ func (s *SenderHandler) cleanup() {
 // monitorContext monitors the context for cancellation and handles cleanup
 func (s *SenderHandler) monitorContext() {
 	<-s.Context().Done()
-
-	// Context was cancelled (e.g., Ctrl+C)
-	log.Printf("Sender context cancelled, cleaning up...")
 
 	// Close the channel if it exists
 	if s.channel != nil {

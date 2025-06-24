@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 
 	"yapfs/internal/config"
 	"yapfs/internal/reporter"
@@ -102,11 +103,15 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	}
 
 	// Start file transfer in background
+	progressCtx, cancelProgress := context.WithCancel(ctx)
+	var progressWg sync.WaitGroup
+	progressWg.Add(1)
 	go func() {
+		defer progressWg.Done()
 		progressCh := senderChannel.StartMessageLoop()
 
 		propressReporter := reporter.NewProgressReporter()
-		propressReporter.StartUpdatingProgress(ctx, progressCh)
+		propressReporter.StartUpdatingProgress(progressCtx, progressCh)
 	}()
 
 	// Wait for any exit condition
@@ -123,6 +128,10 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	}
 
 	cleanup(sessionID)
+
+	// Cancel progress reporting and wait for it to complete
+	cancelProgress()
+	progressWg.Wait()
 
 	return exitErr
 }

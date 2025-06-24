@@ -149,7 +149,7 @@ func (c *Channel) StartMessageLoop() <-chan types.ProgressUpdate {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			c.processOutgoingMessages()
+			c.processOutgoingMessages(progressCh)
 		}()
 
 		// Give message loops a moment to start before notifying handler
@@ -196,6 +196,29 @@ func (c *Channel) SendMessage(msgType MessageType, payload []byte) error {
 	}
 }
 
+// SendErrorMessage queues an error message for sending
+func (c *Channel) SendErrorMessage(errorMsg string) error {
+	if c.IsClosed() {
+		return fmt.Errorf("channel is closed")
+	}
+
+	msg := Message{
+		Type:  MSG_ERROR,
+		Error: errorMsg,
+	}
+	data, err := SerializeMessage(msg)
+	if err != nil {
+		return fmt.Errorf("failed to serialize error message: %w", err)
+	}
+
+	select {
+	case c.outgoingMsgCh <- data:
+		return nil
+	case <-c.ctx.Done():
+		return fmt.Errorf("channel context cancelled")
+	}
+}
+
 // processIncomingMessages handles incoming WebRTC messages
 func (c *Channel) processIncomingMessages(progressCh chan<- types.ProgressUpdate) {
 	for {
@@ -224,11 +247,11 @@ func (c *Channel) handleIncomingMessage(msg webrtc.DataChannelMessage, progressC
 }
 
 // processOutgoingMessages handles outgoing message queue
-func (c *Channel) processOutgoingMessages() {
+func (c *Channel) processOutgoingMessages(progressCh chan<- types.ProgressUpdate) {
 	for {
 		select {
 		case data := <-c.outgoingMsgCh:
-			if err := c.sendRawData(data); err != nil {
+			if err := c.sendRawData(data, progressCh); err != nil {
 				log.Printf("Error sending message: %v", err)
 				c.handleError(err)
 				return
@@ -240,7 +263,7 @@ func (c *Channel) processOutgoingMessages() {
 }
 
 // sendRawData sends raw data through the WebRTC data channel with flow control
-func (c *Channel) sendRawData(data []byte) error {
+func (c *Channel) sendRawData(data []byte, progressCh chan<- types.ProgressUpdate) error {
 	if c.IsClosed() {
 		return fmt.Errorf("channel is closed")
 	}
@@ -254,6 +277,19 @@ func (c *Channel) sendRawData(data []byte) error {
 	err := c.dataChannel.Send(data)
 	if err != nil {
 		return fmt.Errorf("failed to send data: %w", err)
+	}
+
+	// Parse the message to check if it's file data
+	if msg, err := DeserializeMessage(data); err == nil && msg.Type == MSG_FILE_DATA {
+		update := types.ProgressUpdate{
+			NewBytes: uint64(len(msg.Payload)),
+		}
+
+		select {
+		case progressCh <- update:
+		default:
+			// Progress channel full, skip this update to avoid blocking
+		}
 	}
 
 	return nil

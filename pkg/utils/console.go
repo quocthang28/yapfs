@@ -10,11 +10,9 @@ import (
 
 func AskForCode(ctx context.Context) (string, error) {
 	scanner := bufio.NewScanner(os.Stdin)
-
+	
 	for {
-		// Create a channel to receive the input
 		inputCh := make(chan string, 1)
-		defer close(inputCh)
 
 		fmt.Printf("Enter code from sender: ")
 		go func() {

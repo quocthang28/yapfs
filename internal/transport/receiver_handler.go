@@ -271,7 +271,7 @@ func (r *ReceiverHandler) sendErrorAndFail(errorMsg string) error {
 
 	// Try to send error message to sender
 	if r.channel != nil {
-		err := r.channel.SendMessage(MSG_ERROR, []byte(errorMsg))
+		err := r.channel.SendErrorMessage(errorMsg)
 		if err != nil {
 			log.Printf("Failed to send error message to sender: %v", err)
 		}
@@ -310,9 +310,6 @@ func (r *ReceiverHandler) cleanupPartialFile() {
 // monitorContext monitors the context for cancellation and handles cleanup
 func (r *ReceiverHandler) monitorContext() {
 	<-r.Context().Done()
-
-	// Context was cancelled (e.g., Ctrl+C)
-	log.Printf("Receiver context cancelled, cleaning up...")
 
 	// Clean up partial file
 	r.cleanupPartialFile()

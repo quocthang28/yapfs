@@ -12,7 +12,8 @@
       "Bash(git push:*)",
       "Bash(go run:*)",
       "Bash(sed:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(rg:*)"
     ],
     "deny": []
   }
