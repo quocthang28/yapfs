@@ -21,24 +21,17 @@ type SenderOptions struct {
 
 // SenderApp implements sender application logic
 type SenderApp struct {
-	config             *config.Config
-	peerService        *transport.PeerService
-	dataChannelService *transport.DataChannelService
-	signalingService   *signalling.SignalingService
+	config           *config.Config
+	peerService      *transport.PeerService
+	signalingService *signalling.SignalingService
 }
 
 // NewSenderApp creates a new sender application
-func NewSenderApp(
-	cfg *config.Config,
-	peerService *transport.PeerService,
-	dataChannelService *transport.DataChannelService,
-	signalingService *signalling.SignalingService,
-) *SenderApp {
+func NewSenderApp(cfg *config.Config, peerService *transport.PeerService, signalingService *signalling.SignalingService) *SenderApp {
 	return &SenderApp{
-		config:             cfg,
-		peerService:        peerService,
-		dataChannelService: dataChannelService,
-		signalingService:   signalingService,
+		config:           cfg,
+		peerService:      peerService,
+		signalingService: signalingService,
 	}
 }
 
@@ -87,8 +80,15 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 		}
 	}
 
-	// Create data channel for file transfer and initialize everything
-	err = s.dataChannelService.CreateFileSenderDataChannel(ctx, peerConn.PeerConnection, "fileTransfer", opts.FilePath)
+	// Create data channel for file transfer with completion callback
+	senderChannel, err := transport.CreateSenderChannel(ctx, s.config, peerConn.PeerConnection, "fileTransfer", opts.FilePath, 
+		func(err error) {
+			// Channel completed or failed - signal app to exit
+			select {
+			case exitCh <- err:
+			default:
+			}
+		})
 	if err != nil {
 		cleanup("")
 		return fmt.Errorf("failed to create file sender data channel: %w", err)
@@ -98,22 +98,15 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 	sessionID, err := s.signalingService.StartSenderSignallingProcess(ctx, peerConn.PeerConnection)
 	if err != nil {
 		cleanup(sessionID)
-
 		return fmt.Errorf("failed during signalling process: %w", err)
 	}
 
 	// Start file transfer in background
 	go func() {
-		progressCh, err := s.dataChannelService.SendFile()
-		if err != nil {
-			exitCh <- err
-			return
-		}
+		progressCh := senderChannel.StartMessageLoop()
 
 		propressReporter := reporter.NewProgressReporter()
 		propressReporter.StartUpdatingProgress(ctx, progressCh)
-
-		exitCh <- nil
 	}()
 
 	// Wait for any exit condition

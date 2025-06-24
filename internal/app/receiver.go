@@ -22,24 +22,17 @@ type ReceiverOptions struct {
 
 // ReceiverApp implements receiver application logic
 type ReceiverApp struct {
-	config             *config.Config
-	peerService        *transport.PeerService
-	dataChannelService *transport.DataChannelService
-	signalingService   *signalling.SignalingService
+	config           *config.Config
+	peerService      *transport.PeerService
+	signalingService *signalling.SignalingService
 }
 
 // NewReceiverApp creates a new receiver application
-func NewReceiverApp(
-	cfg *config.Config,
-	peerService *transport.PeerService,
-	dataChannelService *transport.DataChannelService,
-	signalingService *signalling.SignalingService,
-) *ReceiverApp {
+func NewReceiverApp(cfg *config.Config, peerService *transport.PeerService, signalingService *signalling.SignalingService) *ReceiverApp {
 	return &ReceiverApp{
-		config:             cfg,
-		peerService:        peerService,
-		dataChannelService: dataChannelService,
-		signalingService:   signalingService,
+		config:           cfg,
+		peerService:      peerService,
+		signalingService: signalingService,
 	}
 }
 
@@ -104,25 +97,26 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 		return fmt.Errorf("failed during signalling process: %w", err)
 	}
 
-	// Setup file receiver data channel
-	err = r.dataChannelService.CreateFileReceiverDataChannel(ctx, peerConn.PeerConnection)
+	// Create receiver channel for file transfer with completion callback
+	receiverChannel, err := transport.CreateReceiverChannel(ctx, r.config, peerConn.PeerConnection, opts.DestPath,
+		func(err error) {
+			// Channel completed or failed - signal app to exit
+			select {
+			case exitCh <- err:
+			default:
+			}
+		})
 	if err != nil {
 		cleanup(code)
-		return fmt.Errorf("failed to setup file receiver data channel handler: %w", err)
+		return fmt.Errorf("failed to create file receiver data channel: %w", err)
 	}
 
 	// Start file receive with progress tracking in background
 	go func() {
-		progressCh, err := r.dataChannelService.ReceiveFile(opts.DestPath)
-		if err != nil {
-			exitCh <- err
-			return
-		}
+		progressCh := receiverChannel.StartMessageLoop()
 
 		propressReporter := reporter.NewProgressReporter()
 		propressReporter.StartUpdatingProgress(ctx, progressCh)
-
-		exitCh <- nil
 	}()
 
 	// Wait for any exit condition

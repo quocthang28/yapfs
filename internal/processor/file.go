@@ -73,8 +73,10 @@ func (f *FileService) calculateFileChecksum(filePath string) (string, error) {
 	defer file.Close()
 
 	hash := sha256.New()
+	
+	// Copy file contents to hash
 	if _, err := io.Copy(hash, file); err != nil {
-		return "", fmt.Errorf("failed to calculate checksum: %w", err)
+		return "", fmt.Errorf("failed to read file for checksum: %w", err)
 	}
 
 	return hex.EncodeToString(hash.Sum(nil)), nil

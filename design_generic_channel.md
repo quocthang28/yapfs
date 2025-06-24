@@ -10,7 +10,6 @@ Current architecture has separate `SenderChannel` and `ReceiverChannel` that onl
 2. **Role-based Handlers**: Pluggable handlers for sender/receiver specific logic  
 3. **Protocol Support**: Support both current unidirectional and future bidirectional protocols
 4. **Clean Architecture**: Separate transport concerns from application logic
-5. **Backward Compatibility**: Maintain current API contracts
 
 ## Architecture Overview
 
@@ -41,10 +40,7 @@ type MessageHandler interface {
     OnChannelReady() error
     OnChannelClosed()
     OnChannelError(err error)
-    
-    // Protocol negotiation
-    GetProtocolVersion() string
-    SupportsAcknowledgements() bool
+
 }
 
 // Factory for creating channels with specific handlers
@@ -180,7 +176,6 @@ type Message struct {
 
 6. **Update DataChannelService** (`internal/transport/data_channel_service.go`)
    - Replace current sender/receiver channels with generic channel
-   - Maintain existing API for backward compatibility
 
 ### Phase 4: Protocol Enhancement
 
@@ -191,38 +186,6 @@ type Message struct {
 
 8. **Add Protocol Versioning**
    - Support both legacy and enhanced protocols
-   - Graceful fallback for compatibility
-
-## Migration Strategy
-
-### Backward Compatibility
-
-```go
-// Maintain existing DataChannelService API
-type DataChannelService struct {
-    config  *config.Config
-    factory *ChannelFactory
-    channel *Channel
-}
-
-// Existing methods delegate to generic channel
-func (s *DataChannelService) CreateFileSenderDataChannel(ctx context.Context, peerConn *webrtc.PeerConnection, label string, filePath string) error {
-    handler := NewSenderHandler(s.config, filePath)
-    s.channel = s.factory.CreateChannel(handler)
-    return s.channel.CreateDataChannel(ctx, peerConn, label)
-}
-
-func (s *DataChannelService) SendFile() (<-chan types.ProgressUpdate, error) {
-    return s.channel.StartMessageLoop()
-}
-```
-
-### Testing Strategy
-
-1. **Unit Tests**: Test each handler independently
-2. **Integration Tests**: Test full protocol flows
-3. **Compatibility Tests**: Ensure legacy protocol still works
-4. **Error Handling Tests**: Test timeout and error scenarios
 
 ## Benefits
 
@@ -243,9 +206,7 @@ internal/transport/
 ├── receiver_handler.go     # Receiver-specific logic
 ├── channel_factory.go      # Factory for creating channels
 ├── message.go              # Message types and protocol
-├── data_channel_service.go # Updated service (backward compatibility)
+├── data_channel_service.go # Updated service
 ├── sender_channel.go       # [DEPRECATED] Current sender
 └── receiver_channel.go     # [DEPRECATED] Current receiver
 ```
-
-This design provides a clean foundation for bidirectional communication while maintaining the current API and adding robust acknowledgement support.

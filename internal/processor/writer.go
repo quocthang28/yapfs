@@ -35,6 +35,7 @@ type fileWriter struct {
 
 // prepareFileForWriting opens a destination file for writing with metadata
 func (w *writerService) prepareFileForWriting(destDir string, metadata *types.FileMetadata) (*fileWriter, string, error) {
+	
 	// Ensure destination directory exists
 	if err := w.fileService.ensureDir(destDir); err != nil {
 		return nil, "", fmt.Errorf("failed to create destination directory: %w", err)
@@ -98,6 +99,7 @@ func (w *writerService) finishWriting(writer *fileWriter) (uint64, error) {
 	if err != nil {
 		return totalBytes, fmt.Errorf("failed to close file: %w", err)
 	}
+
 
 	// Validate checksum
 	if calculatedChecksum != expectedChecksum {
