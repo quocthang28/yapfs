@@ -46,39 +46,3 @@ func DeserializeMessage(data []byte) (Message, error) {
 	}
 	return msg, nil
 }
-
-// IsControlMessage checks if a message type is a control message
-func IsControlMessage(msgType MessageType) bool {
-	switch msgType {
-	case MSG_READY, MSG_METADATA_ACK, MSG_TRANSFER_COMPLETE, MSG_ERROR:
-		return true
-	default:
-		return false
-	}
-}
-
-// IsDataMessage checks if a message type is a data message
-func IsDataMessage(msgType MessageType) bool {
-	switch msgType {
-	case MSG_METADATA, MSG_FILE_DATA, MSG_EOF:
-		return true
-	default:
-		return false
-	}
-}
-
-// CreateControlMessage creates a control message with optional error
-func CreateControlMessage(msgType MessageType, errorMsg string) Message {
-	return Message{
-		Type:  msgType,
-		Error: errorMsg,
-	}
-}
-
-// CreateDataMessage creates a data message with payload
-func CreateDataMessage(msgType MessageType, payload []byte) Message {
-	return Message{
-		Type:    msgType,
-		Payload: payload,
-	}
-}

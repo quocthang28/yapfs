@@ -341,7 +341,10 @@ func (s *SenderHandler) sendEOF() error {
 
 // sendErrorToReceiver sends an error message to the receiver
 func (s *SenderHandler) sendErrorToReceiver(errorMsg string) {
-	msg := CreateControlMessage(MSG_ERROR, errorMsg)
+	msg := Message{
+		Type:  MSG_ERROR,
+		Error: errorMsg,
+	}
 	data, err := SerializeMessage(msg)
 	if err != nil {
 		log.Printf("Failed to serialize error message: %v", err)
@@ -390,7 +393,7 @@ func (s *SenderHandler) setState(state SenderState) {
 func (s *SenderHandler) cleanup() {
 	// Stop any ongoing file transfer
 	s.stopFileTransfer()
-	
+
 	// Close the data processor (closes file reader)
 	if s.dataProcessor != nil {
 		if err := s.dataProcessor.Close(); err != nil {
@@ -402,10 +405,10 @@ func (s *SenderHandler) cleanup() {
 // monitorContext monitors the context for cancellation and handles cleanup
 func (s *SenderHandler) monitorContext() {
 	<-s.Context().Done()
-	
+
 	// Context was cancelled (e.g., Ctrl+C)
 	log.Printf("Sender context cancelled, cleaning up...")
-	
+
 	// Close the channel if it exists
 	if s.channel != nil {
 		s.channel.Close()
