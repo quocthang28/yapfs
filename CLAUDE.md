@@ -39,12 +39,13 @@ go mod download
 ### Package Structure
 - **`cmd/`** - CLI command definitions (Cobra-based)
 - **`internal/app/`** - Application orchestrators (sender.go, receiver.go)
-- **`internal/transport/`** - WebRTC peer and data channel management
+- **`internal/transport/`** - WebRTC transport layer with channel/handler architecture
 - **`internal/signalling/`** - SDP exchange via Firebase Realtime Database
 - **`internal/processor/`** - File I/O and data processing services
 - **`internal/config/`** - Configuration management and validation
-- **`internal/ui/`** - Console UI with progress tracking
+- **`internal/reporter/`** - Progress reporting and UI components
 - **`pkg/utils/`** - Utility functions for codes, files, and SDP handling
+- **`pkg/types/`** - Type definitions and data structures
 
 ### Key Data Flow
 1. **Sender**: Creates WebRTC offer → uploads to Firebase → waits for answer → transfers file
@@ -59,10 +60,14 @@ go mod download
 
 ### Service Architecture
 Services follow composition and dependency injection patterns:
-- **PeerService** - WebRTC peer connection lifecycle
-- **DataChannelService** - Manages sender/receiver channels
+- **PeerService** - WebRTC peer connection lifecycle with enhanced state management
+- **Channel** - Generic bidirectional WebRTC data channel with configurable handlers
+- **MessageHandler Interface** - Contract for handling messages and channel lifecycle events
+- **SenderHandler/ReceiverHandler** - Role-specific message handling with state machines
+- **ChannelFactory** - Factory functions for creating specialized sender/receiver channels
 - **SignalingService** - Orchestrates SDP offer/answer exchange
 - **DataProcessor** - File operations with checksum verification
+- **ProgressReporter** - Dedicated progress tracking and UI updates
 
 ## Important Implementation Details
 
@@ -73,10 +78,33 @@ Services follow composition and dependency injection patterns:
 - ICE servers configurable for NAT traversal
 
 ### File Transfer Protocol
-1. Metadata transmission (JSON with file info, size, checksum)
-2. Chunked file data transfer (configurable chunk size)
-3. SHA-256 checksum verification for integrity
-4. Progress reporting with throughput calculations
+Uses a structured message-based protocol with explicit state management:
+
+**Message Types:**
+- Control: `MSG_READY`, `MSG_METADATA_ACK`, `MSG_TRANSFER_COMPLETE`, `MSG_ERROR`
+- Data: `MSG_METADATA`, `MSG_FILE_DATA`, `MSG_EOF`
+
+**Transfer Flow:**
+1. State machine initialization (sender/receiver)
+2. Metadata transmission (JSON with file info, size, checksum)
+3. Chunked file data transfer (configurable chunk size)
+4. SHA-256 checksum verification for integrity
+5. Progress reporting with throughput calculations
+6. Completion acknowledgment through structured messaging
+
+### State Machine Architecture
+Both sender and receiver implement explicit state machines for reliable transfer coordination:
+
+**Sender States:**
+- `SenderInitializing` → `SenderWaitingForReady` → `SenderSendingMetadata` → `SenderWaitingForMetadataAck` → `SenderTransferringData` → `SenderWaitingForCompletion` → `SenderCompleted`
+
+**Receiver States:**
+- `ReceiverInitializing` → `ReceiverReady` → `ReceiverReceivingMetadata` → `ReceiverPreparingFile` → `ReceiverReceivingData` → `ReceiverCompleted`
+
+**Handler Pattern:**
+- `BaseHandler` provides common functionality (context management, cancellation)
+- Role-specific handlers extend BaseHandler with sender/receiver logic
+- Message validation based on current state prevents protocol violations
 
 ### Error Handling and Cleanup
 - Context-based cancellation throughout the application
@@ -85,9 +113,12 @@ Services follow composition and dependency injection patterns:
 - Partial file cleanup on transfer failures
 
 ### Concurrency Patterns
-- Channel-based communication for progress updates
-- Goroutine coordination with sync.Once patterns
+- Handler-based message processing with separate incoming/outgoing loops
+- Channel-based communication for progress updates and completion callbacks
+- Goroutine coordination with sync.Once patterns for graceful shutdown
 - Context cancellation for coordinated shutdowns
+- Thread-safe state management with read-write mutexes
+- Non-blocking progress reporting with buffered channels
 
 ## Configuration Files
 
