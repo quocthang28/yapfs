@@ -104,11 +104,18 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 		return fmt.Errorf("failed during signalling process: %w", err)
 	}
 
-	// Setup file receiver with progress tracking
-	doneCh, progressCh, err := r.dataChannelService.SetupFileReceiver(peerConn.PeerConnection, opts.DestPath)
+	// Setup file receiver
+	err = r.dataChannelService.SetupFileReceiver(ctx, peerConn.PeerConnection, opts.DestPath)
 	if err != nil {
 		cleanup(code)
 		return fmt.Errorf("failed to setup file receiver data channel handler: %w", err)
+	}
+
+	// Start file receive with progress tracking
+	progressCh, err := r.dataChannelService.ReceiveFile()
+	if err != nil {
+		cleanup(code)
+		return fmt.Errorf("failed to start file receive: %w", err)
 	}
 
 	// Start updating progress on UI
@@ -119,8 +126,6 @@ func (r *ReceiverApp) Run(ctx context.Context, opts *ReceiverOptions) error {
 	var exitErr error
 
 	select {
-	case <-doneCh:
-		// Transfer completed successfully
 	case <-ctx.Done():
 		// Context cancelled
 		exitErr = ctx.Err()

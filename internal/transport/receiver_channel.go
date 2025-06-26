@@ -2,6 +2,7 @@ package transport
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log"
 	"sync"
@@ -16,15 +17,21 @@ import (
 
 // ReceiverChannel manages data channel operations for receiving files
 type ReceiverChannel struct {
+	ctx              context.Context
 	config           *config.Config
 	dataChannel      *webrtc.DataChannel
 	dataProcessor    *processor.DataProcessor
+	destPath         string
+	readyCh          chan struct{} // Signals when data channel is open and ready for file transfer
+	doneCh           chan struct{} // Signals when file transfer is complete
+	progressCh       chan types.ProgressUpdate
 	metadataReceived bool // Track if metadata has been received
 
 	// Progress tracking
-	totalBytes    uint64
-	bytesReceived uint64
-	fileMetadata  *types.FileMetadata
+	fileMetadata *types.FileMetadata
+
+	// Synchronization
+	doneOnce sync.Once
 }
 
 // NewReceiverChannel creates a new data channel receiver
@@ -32,47 +39,72 @@ func NewReceiverChannel(cfg *config.Config) *ReceiverChannel {
 	return &ReceiverChannel{
 		config:           cfg,
 		dataProcessor:    processor.NewDataProcessor(),
+		readyCh:          make(chan struct{}),
+		doneCh:           make(chan struct{}),
 		metadataReceived: false,
 	}
 }
 
-// SetupFileReceiver sets up handlers for receiving files and returns completion and progress channels
-func (r *ReceiverChannel) SetupFileReceiver(peerConn *webrtc.PeerConnection, destPath string) (<-chan struct{}, <-chan types.ProgressUpdate, error) {
-	doneCh := make(chan struct{})
-	progressCh := make(chan types.ProgressUpdate, 50) // Buffer progress updates to match sender
-	var doneOnce sync.Once                            // Ensure doneCh is closed only once
-	var progressOnce sync.Once                        // Ensure progressCh is closed only once
+// SetupFileReceiver sets up handlers for receiving files
+func (r *ReceiverChannel) SetupFileReceiver(ctx context.Context, peerConn *webrtc.PeerConnection, destPath string) error {
+	r.ctx = ctx
+	r.destPath = destPath
 
 	// OnDataChannel sets an event handler which is invoked when a data channel message arrives from a remote peer.
 	peerConn.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
-		r.dataChannel = dataChannel // Store the received data channel internally
+		r.dataChannel = dataChannel
 		log.Printf("Received data channel: %s-%d", r.dataChannel.Label(), r.dataChannel.ID())
 
 		r.dataChannel.OnOpen(func() {
 			log.Printf("File transfer data channel opened: %s-%d. Waiting for metadata...", r.dataChannel.Label(), r.dataChannel.ID())
+			close(r.readyCh)
 		})
 
 		r.dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
-			r.handleMessage(msg, destPath, doneCh, progressCh, &doneOnce, &progressOnce)
+			r.handleMessage(msg)
 		})
 
 		r.dataChannel.OnClose(func() {
 			log.Printf("File transfer data channel closed")
-			// Clean up any open files
 			r.dataProcessor.Close()
-			// Close progress channel if not already closed
-			progressOnce.Do(func() { close(progressCh) })
 		})
 
 		r.dataChannel.OnError(func(err error) {
 			log.Printf("File transfer data channel error: %v", err)
 			r.dataProcessor.Close()
-			// Close progress channel if not already closed
-			progressOnce.Do(func() { close(progressCh) })
 		})
 	})
 
-	return doneCh, progressCh, nil
+	return nil
+}
+
+// ReceiveFile performs a non-blocking file receive, returns progress channel immediately
+func (r *ReceiverChannel) ReceiveFile() (<-chan types.ProgressUpdate, error) {
+	r.progressCh = make(chan types.ProgressUpdate, 50)
+
+	// Start file receive in a goroutine
+	go func() {
+		defer close(r.progressCh)
+
+		// Wait for data channel to be ready
+		select {
+		case <-r.readyCh:
+			log.Printf("Data channel ready, waiting for file transfer")
+		case <-r.ctx.Done():
+			log.Printf("Cancelled while waiting for data channel: %v", r.ctx.Err())
+			return
+		}
+
+		// Wait for completion
+		select {
+		case <-r.doneCh:
+			log.Printf("File transfer completed")
+		case <-r.ctx.Done():
+			log.Printf("File transfer cancelled: %v", r.ctx.Err())
+		}
+	}()
+
+	return r.progressCh, nil
 }
 
 // ClearPartialFile removes any partially written file
@@ -80,10 +112,58 @@ func (r *ReceiverChannel) ClearPartialFile() error {
 	if r.dataProcessor != nil {
 		return r.dataProcessor.ClearPartialFile()
 	}
+
 	return nil
 }
 
-func (r *ReceiverChannel) processMetaData(msg []byte) (*types.FileMetadata, error) {
+// handleMessage dispatches messages to appropriate handlers based on type
+func (r *ReceiverChannel) handleMessage(msg webrtc.DataChannelMessage) {
+	// Determine message type and dispatch to appropriate handler
+	switch {
+	case !r.metadataReceived && bytes.HasPrefix(msg.Data, []byte("METADATA:")):
+		r.handleMetadataPhase(msg)
+	case string(msg.Data) == "EOF":
+		r.handleEOFPhase(msg)
+	default:
+		r.handleFileDataPhase(msg)
+	}
+}
+
+// handleMetadataPhase processes metadata messages
+func (r *ReceiverChannel) handleMetadataPhase(msg webrtc.DataChannelMessage) {
+	metadata, err := r.processMetadata(msg.Data)
+	if err != nil {
+		log.Printf("Error handling metadata: %v", err)
+		r.doneOnce.Do(func() { close(r.doneCh) })
+		return
+	}
+
+	// Set up progress tracking with metadata
+	r.fileMetadata = metadata
+
+	// Send initial progress (non-blocking)
+	select {
+	case r.progressCh <- types.ProgressUpdate{
+		NewBytes: 0,
+		MetaData: metadata,
+	}:
+	default:
+		log.Printf("Progress channel full, skipping metadata progress update")
+	}
+
+	// Prepare file for receiving with metadata
+	finalPath, err := r.dataProcessor.PrepareFileForReceiving(r.destPath, metadata)
+	if err != nil {
+		log.Printf("Error preparing file for receiving: %v", err)
+		r.doneOnce.Do(func() { close(r.doneCh) })
+		return
+	}
+
+	log.Printf("Ready to receive file to: %s", finalPath)
+}
+
+// processMetadata extracts and decodes metadata from message
+func (r *ReceiverChannel) processMetadata(msg []byte) (*types.FileMetadata, error) {
 	metadataBytes := msg[9:] // Remove "METADATA:" prefix
 	metadata, err := utils.DecodeJSON[types.FileMetadata](metadataBytes)
 	if err != nil {
@@ -98,76 +178,8 @@ func (r *ReceiverChannel) processMetaData(msg []byte) (*types.FileMetadata, erro
 	return &metadata, nil
 }
 
-// MessageHandlerContext contains shared context for message handlers
-type MessageHandlerContext struct {
-	destPath     string
-	doneCh       chan struct{}
-	progressCh   chan types.ProgressUpdate
-	doneOnce     *sync.Once
-	progressOnce *sync.Once
-}
-
-// handleMessage dispatches messages to appropriate handlers based on type
-func (r *ReceiverChannel) handleMessage(msg webrtc.DataChannelMessage, destPath string, doneCh chan struct{}, progressCh chan types.ProgressUpdate, doneOnce *sync.Once, progressOnce *sync.Once) {
-	ctx := &MessageHandlerContext{
-		destPath:     destPath,
-		doneCh:       doneCh,
-		progressCh:   progressCh,
-		doneOnce:     doneOnce,
-		progressOnce: progressOnce,
-	}
-
-	// Determine message type and dispatch to appropriate handler
-	switch {
-	case !r.metadataReceived && bytes.HasPrefix(msg.Data, []byte("METADATA:")):
-		r.handleMetadataMessage(msg, ctx)
-	case string(msg.Data) == "EOF":
-		r.handleEOFMessage(msg, ctx)
-	default:
-		r.handleFileDataMessage(msg, ctx)
-	}
-}
-
-// handleMetadataMessage processes metadata messages
-func (r *ReceiverChannel) handleMetadataMessage(msg webrtc.DataChannelMessage, ctx *MessageHandlerContext) {
-	metadata, err := r.processMetaData(msg.Data)
-	if err != nil {
-		log.Printf("Error handling metadata: %v", err)
-		ctx.doneOnce.Do(func() { close(ctx.doneCh) })
-		return
-	}
-
-	// Set up progress tracking with file size
-	r.totalBytes = uint64(metadata.Size)
-	r.bytesReceived = 0
-	r.fileMetadata = metadata
-
-	// Send initial progress (non-blocking)
-	select {
-	case ctx.progressCh <- types.ProgressUpdate{
-		NewBytes: 0,
-		MetaData: metadata,
-	}:
-		// Progress sent successfully
-	default:
-		// Progress channel full, skip this update
-		log.Printf("Progress channel full, skipping metadata progress update")
-	}
-
-	// Prepare file for receiving with metadata
-	finalPath, err := r.dataProcessor.PrepareFileForReceiving(ctx.destPath, metadata)
-	if err != nil {
-		log.Printf("Error preparing file for receiving: %v", err)
-		ctx.doneOnce.Do(func() { close(ctx.doneCh) })
-		return
-	}
-
-	log.Printf("Ready to receive file to: %s", finalPath)
-}
-
-// handleEOFMessage processes EOF messages
-func (r *ReceiverChannel) handleEOFMessage(_ webrtc.DataChannelMessage, ctx *MessageHandlerContext) {
-	// Finish receiving and get total bytes
+// handleEOFPhase processes EOF messages and completes transfer
+func (r *ReceiverChannel) handleEOFPhase(_ webrtc.DataChannelMessage) {
 	totalBytes, err := r.dataProcessor.FinishReceiving()
 	if err != nil {
 		log.Printf("Error processing EOF signal: %v", err)
@@ -179,24 +191,18 @@ func (r *ReceiverChannel) handleEOFMessage(_ webrtc.DataChannelMessage, ctx *Mes
 	update := types.ProgressUpdate{
 		NewBytes: 0,
 	}
-	if r.fileMetadata != nil {
-		update.MetaData = r.fileMetadata
-	}
+
 	select {
-	case ctx.progressCh <- update:
-		// Progress sent successfully
+	case r.progressCh <- update:
 	default:
-		// Progress channel full, skip this update
 	}
 
-	// Close progress channel and signal completion
-	ctx.progressOnce.Do(func() { close(ctx.progressCh) })
-	ctx.doneOnce.Do(func() { close(ctx.doneCh) })
+	// Signal completion
+	r.doneOnce.Do(func() { close(r.doneCh) })
 }
 
-// handleFileDataMessage processes file data messages
-func (r *ReceiverChannel) handleFileDataMessage(msg webrtc.DataChannelMessage, ctx *MessageHandlerContext) {
-	// Handle file data (only after metadata is received)
+// handleFileDataPhase processes file data messages
+func (r *ReceiverChannel) handleFileDataPhase(msg webrtc.DataChannelMessage) {
 	if !r.metadataReceived {
 		log.Printf("Received file data before metadata, ignoring")
 		return
@@ -209,21 +215,13 @@ func (r *ReceiverChannel) handleFileDataMessage(msg webrtc.DataChannelMessage, c
 		return
 	}
 
-	// Update progress tracking
-	bytesReceived := uint64(len(msg.Data))
-	r.bytesReceived += bytesReceived
-
-	// Send raw progress update (UI layer handles calculations and throttling)
+	// Send progress update (non-blocking)
 	update := types.ProgressUpdate{
-		NewBytes: bytesReceived,
+		NewBytes: uint64(len(msg.Data)),
 	}
-	if r.fileMetadata != nil {
-		update.MetaData = r.fileMetadata
-	}
-	// Non-blocking progress send to prevent data channel blocking
+
 	select {
-	case ctx.progressCh <- update:
-		// Progress sent successfully
+	case r.progressCh <- update:
 	default:
 		// Progress channel full, skip this update to avoid blocking data transfer
 	}

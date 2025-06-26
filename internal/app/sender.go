@@ -112,7 +112,7 @@ func (s *SenderApp) Run(ctx context.Context, opts *SenderOptions) error {
 
 		propressReporter := reporter.NewProgressReporter()
 		propressReporter.StartUpdatingProgress(ctx, progressCh)
-		
+
 		exitCh <- nil
 	}()
 
